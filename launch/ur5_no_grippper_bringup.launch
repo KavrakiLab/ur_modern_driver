@@ -19,7 +19,6 @@
     <arg name="limited" value="$(arg limited)"/>
   </include>
 
-
   <!-- ur common -->
   <include file="$(find ur_modern_driver)/launch/ur_common.launch">
     <arg name="prefix"  value="$(arg prefix)" />
