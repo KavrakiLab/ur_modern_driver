@@ -47,6 +47,7 @@
 #include "ur_msgs/IOStates.h"
 #include "ur_msgs/Digital.h"
 #include "ur_msgs/Analog.h"
+#include "geometry_msgs/WrenchStamped.h"
 #include "std_msgs/String.h"
 #include <controller_manager/controller_manager.h>
 #include <realtime_tools/realtime_publisher.h>
@@ -68,6 +69,7 @@ protected:
 	control_msgs::FollowJointTrajectoryResult result_;
 	ros::Subscriber speed_sub_;
 	ros::Subscriber urscript_sub_;
+	ros::Subscriber	force_torque_sub_;
 	ros::ServiceServer io_srv_;
 	ros::ServiceServer payload_srv_;
 	std::thread* rt_publish_thread_;
@@ -81,6 +83,11 @@ protected:
 	std::thread* ros_control_thread_;
 	boost::shared_ptr<ros_control_ur::UrHardwareInterface> hardware_interface_;
 	boost::shared_ptr<controller_manager::ControllerManager> controller_manager_;
+	std::vector<double> Fx_list;
+	std::vector<double> Fy_list;
+	std::vector<double> Fz_list;
+	double max_force_dev_;
+	int force_average_count_;
 
 public:
 	RosWrapper(std::string host, int reverse_port) :
@@ -98,7 +105,7 @@ public:
 		    if (joint_prefix.length() > 0) {
     			sprintf(buf, "Setting prefix to %s", joint_prefix.c_str());
 	    		print_info(buf);
-	        }	
+	        }
         }
 		joint_names.push_back(joint_prefix + "shoulder_pan_joint");
 		joint_names.push_back(joint_prefix + "shoulder_lift_joint");
@@ -150,10 +157,10 @@ public:
 		robot_.setMaxPayload(max_payload);
 		sprintf(buf, "Bounds for set_payload service calls: [%f, %f]",
 				min_payload, max_payload);
-		print_debug(buf);
+			print_debug(buf);
 
 		double servoj_time = 0.008;
-		if (ros::param::get("~servoj_time", servoj_time)) {
+		if(ros::param::get("~servoj_time", servoj_time)) {
 			sprintf(buf, "Servoj_time set to: %f [sec]", servoj_time);
 			print_debug(buf);
 		}
@@ -209,10 +216,23 @@ public:
 			urscript_sub_ = nh_.subscribe("ur_driver/URScript", 1,
 					&RosWrapper::urscriptInterface, this);
 
+			if (ros::param::get("~max_force_dev", max_force_dev_)) {
+					sprintf(buf, "max sensor deviation set to: %f [mN]", max_force_dev_);
+					print_debug(buf);
+				}
+
+			if (ros::param::get("~force_average_count", force_average_count_)) {
+					sprintf(buf, "force average count set to: %d ", force_average_count_);
+					print_debug(buf);
+				}
+
+			force_torque_sub_ = nh_.subscribe("robotiq_force_torque_wrench", 100, &RosWrapper::force_torque_sub, this);
+
 			io_srv_ = nh_.advertiseService("ur_driver/set_io",
 					&RosWrapper::setIO, this);
 			payload_srv_ = nh_.advertiseService("ur_driver/set_payload",
 					&RosWrapper::setPayload, this);
+
 		}
 	}
 
@@ -315,7 +335,7 @@ private:
 			print_error(result_.error_string);
 			return;
 		}
-        
+
 		if (!has_velocities()) {
 			result_.error_code = result_.INVALID_GOAL;
 			result_.error_string = "Received a goal without velocities";
@@ -343,7 +363,7 @@ private:
 		}
 
 		reorder_traj_joints(goal.trajectory);
-		
+
 		if (!start_positions_match(goal.trajectory, 0.01)) {
 			result_.error_code = result_.INVALID_GOAL;
 			result_.error_string = "Goal start doesn't match current pose";
@@ -562,6 +582,79 @@ private:
 
 	}
 
+	void force_torque_sub(const geometry_msgs::WrenchStamped::ConstPtr& msg)
+	{
+		bool estop;
+		char buf[256];
+		estop = false;
+		bool start = false;
+		double Fx_avg = 0;
+		double Fy_avg = 0;
+		double Fz_avg = 0;
+		double total_avg = 0;
+		double total_current = 0;
+		this->Fx_list.push_back(msg->wrench.force.x);
+		this->Fy_list.push_back(msg->wrench.force.y);
+		this->Fz_list.push_back(msg->wrench.force.z);
+		if (this->Fx_list.size() > this->force_average_count_){
+			this->Fx_list.erase(this->Fx_list.begin());
+			Fx_avg = RosWrapper::average_vector(this->Fx_list);
+			start = true;
+		}
+		if (this->Fy_list.size() > this->force_average_count_){
+			this->Fy_list.erase(this->Fy_list.begin());
+			Fy_avg = RosWrapper::average_vector(this->Fy_list);
+		}
+		if (this->Fz_list.size() > this->force_average_count_){
+			this->Fz_list.erase(this->Fz_list.begin());
+			Fz_avg = RosWrapper::average_vector(this->Fz_list);
+		}
+
+		total_avg = std::sqrt(Fx_avg*Fx_avg + Fy_avg*Fy_avg + Fz_avg*Fz_avg);
+		total_current = std::sqrt(msg->wrench.force.x*msg->wrench.force.x +
+															msg->wrench.force.y*msg->wrench.force.y +
+															msg->wrench.force.z*msg->wrench.force.z);
+		if (((total_current < total_avg - this->max_force_dev_) || (total_current > total_avg + this->max_force_dev_)) && start){
+			estop = true;
+		}
+		sprintf(buf, "total_max = %f \nmin total_min = %f", total_avg + this->max_force_dev_, total_avg - this->max_force_dev_);
+		print_debug(buf);
+		sprintf(buf, "Force avgs \nFx = %f \nFy = %f, \nFz=%f \ntotal=%f", Fx_avg, Fy_avg, Fz_avg, total_avg);
+		print_debug(buf);
+		sprintf(buf, "this->max_force_dev_ = %f", this->max_force_dev_);
+		print_debug(buf);
+		if (estop == false)
+		{
+			sprintf(buf, "system is safe");
+			print_debug(buf);
+		}
+		else {
+			sprintf(buf, "Force avgs \nFx = %f \nFy = %f, \nFz=%f \ntotal=%f", Fx_avg, Fy_avg, Fz_avg, total_avg);
+			print_info(buf);
+			sprintf(buf, "MAXIMUM REACHED, TOTAL VALUE = %f", total_current);
+			print_info(buf);
+			this->robot_.stopTraj();
+			//RosWrapper::halt(); //stop traj will stop motion, this will kill entire driver.
+		}
+
+	}
+
+	double average_vector(std::vector<double> vector)
+	{
+		double average;
+		double total;
+		int length;
+		length = vector.size();
+		total = 0;
+
+		for ( int i=0; i < length; i++)
+		{
+			total += vector[i];
+		}
+		average = (total/length);
+		return average;
+	}
+
 	void rosControlLoop() {
 		ros::Duration elapsed_time;
 		struct timespec last_time, current_time;
@@ -609,7 +702,7 @@ private:
 
 			// Broadcast transform
 			if( tf_pub.trylock() )
-			{			
+			{
 				tf_pub.msg_.transforms[0].header.stamp = ros_time;
 				if (angle < 1e-16) {
 					tf_pub.msg_.transforms[0].transform.rotation.x = 0;
@@ -633,7 +726,7 @@ private:
 			std::vector<double> tcp_speed = robot_.rt_interface_->robot_state_->getTcpSpeedActual();
 
 			if( tool_vel_pub.trylock() )
-			{			
+			{
 				tool_vel_pub.msg_.header.stamp = ros_time;
 				tool_vel_pub.msg_.twist.linear.x = tcp_speed[0];
 				tool_vel_pub.msg_.twist.linear.y = tcp_speed[1];
