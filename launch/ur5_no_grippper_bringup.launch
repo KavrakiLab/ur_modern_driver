@@ -9,10 +9,12 @@
 <launch>
 
   <!-- robot_ip: IP-address of the robot's socket-messaging server -->
+  <arg name="force_sensor" default="false"/>
   <arg name="robot_ip"/>
   <arg name="limited" default="true"/>
   <arg name="min_payload"  default="0.0"/>
   <arg name="max_payload"  default="5.0"/>
+  <arg name="max_force_dev" default="7.0"/>
   <arg name="prefix" default="" />
   <!-- robot model -->
   <include file="$(find ur_description)/launch/ur5_table.launch">
@@ -25,6 +27,11 @@
     <arg name="robot_ip" value="$(arg robot_ip)"/>
     <arg name="min_payload"  value="$(arg min_payload)"/>
     <arg name="max_payload"  value="$(arg max_payload)"/>
+    <arg name="max_force_dev" value="$(arg max_force_dev)"/>
   </include>
+
+  <group if="$(arg force_sensor)">
+    <include file="$(find robotiq_force_torque_sensor)/launch/force_torque_sensor.launch"/>
+  </group>
 
 </launch>
