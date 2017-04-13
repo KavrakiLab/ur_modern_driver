@@ -10,6 +10,7 @@
 
   <!-- robot_ip: IP-address of the robot's socket-messaging server -->
   <arg name="force_sensor" default="false"/>
+  <arg name="gripper" default="false"/>
   <arg name="robot_ip"/>
   <arg name="limited" default="true"/>
   <arg name="min_payload"  default="0.0"/>
@@ -32,6 +33,10 @@
 
   <group if="$(arg force_sensor)">
     <include file="$(find robotiq_force_torque_sensor)/launch/force_torque_sensor.launch"/>
+  </group>
+
+  <group if="$(arg gripper)">
+    <include file="$(find robotiq_85_bringup)/launch/robotiq_85.launch"/>
   </group>
 
 </launch>

@@ -9,7 +9,8 @@
 <launch>
 
   <!-- robot_ip: IP-address of the robot's socket-messaging server -->
-  <arg name="force_sensor" default="false"/>
+  <arg name="force_sensor" default="true"/>
+  <arg name="gripper" default="true"/>
   <arg name="max_force_dev" default="7.0"/>
   <arg name="robot_ip"/>
   <arg name="limited" default="true"/>
@@ -32,6 +33,10 @@
 
   <group if="$(arg force_sensor)">
     <include file="$(find robotiq_force_torque_sensor)/launch/force_torque_sensor.launch"/>
+  </group>
+
+  <group if="$(arg gripper)">
+    <include file="$(find robotiq_85_bringup)/launch/robotiq_85.launch"/>
   </group>
 
 </launch>
