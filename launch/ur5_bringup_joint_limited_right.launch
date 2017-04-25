@@ -20,7 +20,6 @@
   <!-- robot model -->
   <include file="$(find ur_description)/launch/ur5_robotiq85_upload.launch">
     <arg name="limited" value="$(arg limited)"/>
-    <arg name="prefix" value="$(arg prefix)"/>
   </include>
 
   <!-- ur common -->
@@ -37,9 +36,7 @@
   </group>
 
   <group if="$(arg gripper)">
-    <include file="$(find robotiq_85_bringup)/launch/robotiq_85.launch">
-      <arg name="prefix" value="$(arg prefix)"/>
-    </include>
+    <include file="$(find robotiq_85_bringup)/launch/robotiq_85.launch"/>
   </group>
 
 </launch>
