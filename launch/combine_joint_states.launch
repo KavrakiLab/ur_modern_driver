@@ -1,0 +1,5 @@
+<launch>
+
+  <node pkg="ur_modern_driver" type="combine_joint_states.py" name="combine_joint_states" output="screen"/>
+
+</launch>
