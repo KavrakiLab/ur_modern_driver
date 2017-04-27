@@ -42,6 +42,7 @@
     <group if="$(arg gripper)">
       <include file="$(find robotiq_85_bringup)/launch/robotiq_85.launch">
         <arg name="prefix" value="$(arg prefix)"/>
+        <arg name="double" value="$(arg double)"/>
       </include>
     </group>
   </group>
