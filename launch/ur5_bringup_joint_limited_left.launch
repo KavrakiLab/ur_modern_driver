@@ -12,7 +12,7 @@
   <arg name="force_sensor" default="true"/>
   <arg name="gripper" default="true"/>
   <arg name="max_force_dev" default="7.0"/>
-  <arg name="robot_ip" default="192.168.0.19"/>
+  <arg name="robot_ip" default="192.168.0.20"/>
   <arg name="limited" default="true"/>
   <arg name="min_payload"  default="0.0"/>
   <arg name="max_payload"  default="5.0"/>
