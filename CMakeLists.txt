@@ -18,6 +18,8 @@ find_package(catkin REQUIRED COMPONENTS
   tf
 )
 
+set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
+
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
 
@@ -133,9 +135,16 @@ endif()
 ## Specify additional locations of header files
 ## Your package locations should be listed before other locations
 # include_directories(include)
-include_directories(include 
+include_directories(include
   ${catkin_INCLUDE_DIRS}
+  ~/amino/include
 )
+
+# Amino requires SDL
+find_package(SDL2 REQUIRED)
+find_package(BLAS REQUIRED)
+
+include_directories(${SDL2_INCLUDE_DIR})
 
 ## Declare a C++ library
 
@@ -161,15 +170,38 @@ set(${PROJECT_NAME}_SOURCES
     src/do_output.cpp)
 add_executable(ur_driver ${${PROJECT_NAME}_SOURCES})
 
+add_library(ur_modern_driver ${${PROJECT_NAME}_SOURCES})
+
+target_link_libraries(ur_modern_driver ur_hardware_interface ${catkin_LIBRARIES})
+
 ## Add cmake target dependencies of the executable
 ## same as for the library above
- add_dependencies(ur_driver ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+add_dependencies(ur_driver ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 ## Specify libraries to link a library or executable target against
 target_link_libraries(ur_driver
   ur_hardware_interface
   ${catkin_LIBRARIES}
  )
+
+# Create realtime driver from modified ksim code.
+add_executable(ur_realtime_driver src/ur_realtime_driver.cpp)
+
+find_library(ACH_LIBRARY ach)
+find_library(SNS_LIBRARY sns)
+find_library(AMINO_LIBRARY amino)
+find_library(AMINO_GL_LIBRARY amino-gl)
+
+if (NOT ACH_LIBRARY OR NOT SNS_LIBRARY OR NOT AMINO_LIBRARY OR NOT AMINO_GL_LIBRARY)
+    message(FATAL_ERROR "Required libraries not found!")
+endif()
+
+target_link_libraries(ur_realtime_driver ur_modern_driver ${SDL2_LIBRARY}
+        ${ACH_LIBRARY}
+        ${SNS_LIBRARY}
+        ${AMINO_LIBRARY}
+        ${AMINO_GL_LIBRARY}
+        blas ${BLAS_LIBRARIES})
 
 #############
 ## Install ##
@@ -178,7 +210,7 @@ target_link_libraries(ur_driver
 install(DIRECTORY launch/ DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/launch)
 
 ## Mark executables and/or libraries for installation
-install(TARGETS ur_driver ur_hardware_interface
+install(TARGETS ur_driver ur_hardware_interface ur_modern_driver ur_realtime_driver
   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
