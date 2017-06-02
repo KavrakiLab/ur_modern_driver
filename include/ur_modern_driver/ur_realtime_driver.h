@@ -35,6 +35,8 @@
 #include <amino/rx/scene_gl.h>
 #include <amino/rx/scene_win.h>
 
+#include "ur_driver.h"
+
 struct cx;
 
 struct in_cx {
@@ -49,7 +51,6 @@ struct cx {
     size_t n_ref;
 
     struct aa_rx_sg *scenegraph;
-
 
     double *q_ref;
     double *dq_ref;
@@ -66,6 +67,13 @@ struct cx {
 
     struct sns_evhandler *handlers;
     struct timespec period;
+
+    // Robot control provided by ur_modern_driver
+    UrDriver *robot;
+
+    // Messaging condition variables for ur_driver
+    std::condition_variable rt_msg_cond;
+    std::condition_variable msg_cond;
 };
 
 // Run io
@@ -78,8 +86,8 @@ enum ach_status io_periodic( void *cx );
 
 void put_state( struct cx *cx );
 
-// Perform a simulation step
-enum ach_status simulate( struct cx *cx );
+// Perform a step
+enum ach_status command( struct cx *cx );
 
 // Handle a message
 enum ach_status handle_msg( void *cx, void *msg, size_t msg_size );

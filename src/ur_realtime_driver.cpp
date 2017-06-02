@@ -35,12 +35,13 @@ int main(int argc, char **argv)
     const char *opt_scene_plugin = NULL;
     const char *opt_scene_name = NULL;
     const double opt_sim_frequecy = 100;
+    std::string host;
 
     /* Parse Options */
     {
         int c = 0;
         opterr = 0;
-        while( (c = getopt( argc, argv, "s:o:i:n:h?" SNS_OPTSTRING)) != -1 ) {
+        while( (c = getopt( argc, argv, "s:o:i:n:r:h?" SNS_OPTSTRING)) != -1 ) {
             switch(c) {
                 SNS_OPTCASES_VERSION("sns-ksim",
                                      "Copyright (c) 2017, Rice University\n",
@@ -58,6 +59,9 @@ int main(int argc, char **argv)
                     aa_mem_rlist_push_ptr( names_list, optarg );
                     cx.n_ref++;
                     break;
+                case 'r':
+                    host.assign(optarg);
+                    break;
                 case '?':   /* help     */
                 case 'h':
                     puts( "Usage: sns-ksim -i INPUT_CHANNEL -o OUTPUT_CHANNEL -s SCENE_PLUGIN\n"
@@ -68,11 +72,12 @@ int main(int argc, char **argv)
                                   "  -i,                       reference input channel\n"
                                   "  -s,                       scenegraph plugin\n"
                                   "  -n,                       scenegraph name\n"
+                                  "  -r,                       robot ip address\n"
                                   "  -V,                       Print program version\n"
                                   "  -?,                       display this help and exit\n"
                                   "\n"
                                   "Examples:\n"
-                                  "  sns-ksim -o state -i ref -s libmyrobot.so -n myrobot\n"
+                                  "  sns-ksim -o state -i ref -s libmyrobot.so -n myrobot -r 192.168.0.19\n"
                                   "\n"
                                   "Report bugs to <ntd@rice.edu>"
                     );
@@ -141,6 +146,12 @@ int main(int argc, char **argv)
     pthread_t io_thread;
     if( pthread_create(&io_thread, NULL, io_start, &cx) ) {
         SNS_DIE("Could not create simulation thread: `%s'", strerror(errno));
+    }
+
+    // Initialize UrDriver - TODO: may want to add more parameters later as command-line args.
+    cx.robot = new UrDriver(cx.rt_msg_cond, cx.msg_cond, host);
+    if (!cx.robot->start()) {
+        SNS_DIE("Could not start robot driver");
     }
 
     // Start GUI in main thread
@@ -223,7 +234,7 @@ enum ach_status io_periodic( void *cx_ )
 {
     struct cx *cx = (struct cx*)cx_;
     // Run simulation
-    simulate(cx);
+    command(cx);
     put_state(cx);
 
 
@@ -239,7 +250,7 @@ enum ach_status io_periodic( void *cx_ )
 }
 
 
-enum ach_status simulate( struct cx *cx )
+enum ach_status command( struct cx *cx )
 {
     struct timespec now;
     clock_gettime(ACH_DEFAULT_CLOCK, &now);
@@ -247,20 +258,54 @@ enum ach_status simulate( struct cx *cx )
     cx->t = now;
     int n_q = (int)cx->n_q;
 
+    // Integrate (euler step)
+    // TODO: Replace by commanding to actual robot
+//    cblas_daxpy(n_q, dt, cx->dq_act, 1, cx->q_act, 1 );
+
+    std::mutex msg_lock; // Dummy mutex, robot state is already protected.
+    std::unique_lock<std::mutex> locker(msg_lock);
+    while (!cx->robot->rt_interface_->robot_state_->getControllerUpdated()) {
+        cx->rt_msg_cond.wait(locker);
+    }
+
+    std::vector<double> pos = cx->robot->rt_interface_->robot_state_->getQActual();
+    std::vector<double> vel = cx->robot->rt_interface_->robot_state_->getQdActual();
+
+    // Get currents and torques.
+//    std::vector<double> current = cx->robot->rt_interface_->robot_state_->getIActual();
+//    std::vector<double> tcp = cx->robot->rt_interface_->robot_state->getTcpForce();
+
+    for (auto i = 0; i < cx->n_q; i++) {
+        cx->q_act[i] = pos[i];
+        cx->dq_act[i] = vel[i];
+    }
+    cx->robot->rt_interface_->robot_state_->setControllerUpdated();
+
+    // TODO: Publish robot state here?
+
     // Set Refs
     if( cx->have_q_ref ) {
         // Set ref pos
         cblas_dcopy( n_q, cx->q_ref, 1, cx->q_act, 1 );
         AA_MEM_ZERO(cx->dq_act, cx->n_q);
+        std::vector<double> cmd_pos(cx->q_ref, cx->q_ref + cx->n_q);
+
+        // Command the robot to the reference position.
+        cx->robot->servoj(cmd_pos);
     } else if( cx->have_dq_ref ) {
         // Set ref vel
         cblas_dcopy( n_q, cx->dq_ref, 1, cx->dq_act, 1 );
+
+        // Taken from ur_hardware_interface
+        double max_vel_change_ = 0.12;
+
+        // Command the robot to the reference velocity.
+        cx->robot->setSpeed(cx->dq_ref[0], cx->dq_ref[1], cx->dq_ref[2], cx->dq_ref[3],
+                            cx->dq_ref[4], cx->dq_ref[5], max_vel_change_ * 125);
     }
+
     cx->have_q_ref = 0;
     cx->have_dq_ref = 0;
-
-    // Integrate (euler step)
-    cblas_daxpy(n_q, dt, cx->dq_act, 1, cx->q_act, 1 );
 
     return ACH_OK;
 }
