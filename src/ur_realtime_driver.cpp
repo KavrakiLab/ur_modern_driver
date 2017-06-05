@@ -134,7 +134,7 @@ int main(int argc, char **argv)
     for (auto host : hosts) {
         auto robot = new UrDriver(cx.rt_msg_cond, cx.msg_cond, host);
 
-        if (robot->start()) {
+        if (!robot->start()) {
             SNS_DIE("Could not start robot driver for host %s", host.c_str());
         }
 
@@ -247,6 +247,7 @@ enum ach_status command( struct cx *cx )
        robot->rt_interface_->robot_state_->setControllerUpdated();
     }
 
+
     /* Collect references */
     sns_motor_ref_collate(&cx->t, cx->ref_set);
 
@@ -257,7 +258,7 @@ enum ach_status command( struct cx *cx )
         double u = cx->ref_set->u[i];
         double *q = state->q+i;
         double *dq = state->dq+i;
-
+	
         /**
          * Since we iterate over all joints in the scenegraph, we must
          * split the appropriate position and velocity references to
@@ -265,6 +266,8 @@ enum ach_status command( struct cx *cx )
          */
         size_t robot_num = i / UR5_JOINT_N;
         size_t joint_num = i % UR5_JOINT_N;
+	if (robot_num + 1 > cx->robots.size())
+            continue;
         if( aa_tm_cmp(now,m->expiration) < 0 ) {
             switch(m->mode) {
                 case SNS_MOTOR_MODE_POS:
