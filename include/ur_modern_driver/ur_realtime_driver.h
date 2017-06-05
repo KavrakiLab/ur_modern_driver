@@ -19,47 +19,43 @@
 #ifndef UR_MODERN_DRIVER_UR_REALTIME_DRIVER_H
 #define UR_MODERN_DRIVER_UR_REALTIME_DRIVER_H
 
-#include <poll.h>
-#include <sns.h>
-#include <sns/event.h>
-#include <ach/experimental.h>
-#include <getopt.h>
 
-#include <cblas.h>
-
+#include <amino.h>
 #include <amino/rx/rxtype.h>
-#include <amino/rx/scenegraph.h>
 #include <amino/rx/scene_plugin.h>
 #include <amino/mem.h>
 
 #include <amino/rx/scene_gl.h>
 #include <amino/rx/scene_win.h>
 
+#include <amino/ct/state.h>
+#include <amino/rx/scenegraph.h>
+
+#include <poll.h>
+#include <sns.h>
+#include <sns/event.h>
+#include <sns/motor.h>
+#include <ach/experimental.h>
+#include <getopt.h>
+
+#include <cblas.h>
+
+
 #include "ur_driver.h"
 
-struct cx;
-
-struct in_cx {
-    struct ach_channel channel;
-    const char *name;
-    struct cx *cx;
-};
+#define UR5_JOINT_N 6
 
 struct cx {
-    struct in_cx *in;
-    struct ach_channel state_out;
-    size_t n_ref;
-
     struct aa_rx_sg *scenegraph;
 
-    double *q_ref;
-    double *dq_ref;
-    int have_q_ref;
-    int have_dq_ref;
+    struct sns_motor_channel *ref_in;
+    struct sns_motor_channel *state_out;
+
+    struct sns_motor_ref_set *ref_set;
+    struct sns_motor_state_set *state_set;
+
     struct timespec t;
 
-    double *q_act;
-    double *dq_act;
     size_t n_q;
     uint64_t seq;
 
@@ -69,7 +65,7 @@ struct cx {
     struct timespec period;
 
     // Robot control provided by ur_modern_driver
-    UrDriver *robot;
+    std::vector<UrDriver *> robots;
 
     // Messaging condition variables for ur_driver
     std::condition_variable rt_msg_cond;
@@ -83,8 +79,6 @@ void* io_start(void *cx);
 
 // Call periodically from io thread
 enum ach_status io_periodic( void *cx );
-
-void put_state( struct cx *cx );
 
 // Perform a step
 enum ach_status command( struct cx *cx );

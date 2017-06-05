@@ -138,6 +138,7 @@ endif()
 include_directories(include
   ${catkin_INCLUDE_DIRS}
   ~/amino/include
+  ~/sns/include
 )
 
 # Amino requires SDL
