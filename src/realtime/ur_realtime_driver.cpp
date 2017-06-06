@@ -22,7 +22,7 @@
 
 #endif
 
-#include "ur_modern_driver/ur_realtime_driver.h"
+#include "ur_modern_driver/realtime/ur_realtime_driver.h"
 
 int main(int argc, char **argv)
 {

@@ -41,7 +41,7 @@
 #include <cblas.h>
 
 
-#include "ur_driver.h"
+#include "../ur_driver.h"
 
 #define UR5_JOINT_N 6
 

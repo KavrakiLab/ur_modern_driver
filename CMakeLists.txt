@@ -186,7 +186,7 @@ target_link_libraries(ur_driver
  )
 
 # Create realtime driver from modified ksim code.
-add_executable(ur_realtime_driver src/ur_realtime_driver.cpp)
+add_executable(ur_realtime_driver src/realtime/ur_realtime_driver.cpp)
 
 find_library(ACH_LIBRARY ach)
 find_library(SNS_LIBRARY sns)
