@@ -16,8 +16,8 @@
  * limitations under the License.
  */
 
-#ifndef UR_MODERN_DRIVER_UR_REALTIME_DRIVER_H
-#define UR_MODERN_DRIVER_UR_REALTIME_DRIVER_H
+#ifndef UR_MODERN_DRIVER_REALTIME_UR_REALTIME_DRIVER_H
+#define UR_MODERN_DRIVER_REALTIME_UR_REALTIME_DRIVER_H
 
 
 #include <amino.h>
@@ -86,4 +86,4 @@ enum ach_status command( struct cx *cx );
 // Handle a message
 enum ach_status handle_msg( void *cx, void *msg, size_t msg_size );
 
-#endif //UR_MODERN_DRIVER_UR_REALTIME_DRIVER_H
+#endif //UR_MODERN_DRIVER_REALTIME_UR_REALTIME_DRIVER_H

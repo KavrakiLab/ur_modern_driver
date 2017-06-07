@@ -258,7 +258,7 @@ enum ach_status command( struct cx *cx )
         double u = cx->ref_set->u[i];
         double *q = state->q+i;
         double *dq = state->dq+i;
-	
+
         /**
          * Since we iterate over all joints in the scenegraph, we must
          * split the appropriate position and velocity references to
