@@ -22,45 +22,63 @@
 #ifndef UR_MODERN_DRIVER_REALTIME_TRAJECTORY_BLENDING_H
 #define UR_MODERN_DRIVER_REALTIME_TRAJECTORY_BLENDING_H
 
+#include <stdbool.h>
+
 #include <amino.h>
 #include <amino/ct/state.h>
 #include <amino/ct/traj.h>
+#include <amino/rx/scenegraph.h>
+
+#include <ach.h>
+#include <ach/generic.h>
+#include <ach/experimental.h>
 
 #include <sns.h>
 #include <sns/event.h>
 #include <sns/motor.h>
+#include <sns/path.h>
 #include <ach/experimental.h>
+
+#include <getopt.h>
 
 /**
  * The context needed for continually following a trajectory.
  */
-struct traj_follow_cx_init {
+struct traj_follow_cx {
+    /** An amino memory region from which to allocate states and seg-lists. */
+    struct aa_mem_region *reg;
+
     /** The channel to send motor references to (ideally the actual robot driver). */
-    struct ach_channel ref_channel;
+    struct sns_motor_channel *ref_out;
+    struct sns_motor_ref_set *ref_set;
+
+    /** The channel on which motor state in being recieved. */
+    struct sns_motor_channel *state_in;
+    struct sns_motor_state_set *state_set;
+
+    /** The number of configurations of the robot being controlled. */
+    size_t n_q;
 
     /** How to send motor references to the robot driver. */
     enum sns_motor_mode mode;
 
     /** The proportional gain when following a trajectory. */
     double k_p;
-};
 
-struct traj_follow_cx {
-    /**
-     * The initial parameters that this follow context can be seeded from the
-     * blend context.
-     */
-    const struct traj_follow_cx_init *init;
+    /** The frequency of the robot driver. Determines the duration of each ref. */
+    double frequency;
 
-    /**
-     * The blended path to follow.
-     */
+    /** The blended path to follow. */
     struct aa_ct_seg_list *seg_list;
 
-    /**
-     * The time that the execution of this path was started.
-     */
+    /** The time that the execution of this path was started. */
     double start_time;
+
+    /**
+     * If true, then you have recieved different trajectory to follow.
+     * Restart the start_time and follow the new trajectory.
+     */
+    bool new_traj;
 };
 
 /**
@@ -70,11 +88,14 @@ struct traj_blend_cx {
     /** The limits of the robot for which the path is being blended. */
     struct aa_ct_state *limits;
 
+    /** The channel on which path messages are being recieved. */
+    struct ach_channel path_in;
+
     /**
      * Used to begin the process of trajectory following after the waypoints
      * are blended.
      */
-    struct traj_follow_cx_init *follow_cx;
+    struct traj_follow_cx *follow_cx;
 };
 
 /**
