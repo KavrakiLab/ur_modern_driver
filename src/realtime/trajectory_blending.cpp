@@ -121,6 +121,7 @@ int main(int argc, char **argv)
     }
 
     sns_chan_open(&blend_cx.path_in, path_channel_name, NULL);
+    sns_chan_open(&follow_cx.finished_out, "path_finished", NULL);
     blend_cx.follow_cx = &follow_cx;
 
     // TODO: make these params command line args with these as defaults.
@@ -212,15 +213,24 @@ enum ach_status handle_follow_state(void *cx_, void *msg_, size_t msg_size)
     }
 
     double reltime = seconds - cx->start_time;
-    if (reltime >= aa_ct_seg_list_duration(cx->seg_list)) {
-        // We've extended beyond past the end of the trajectory. Do nothing.
-        return (ACH_OK);
-    }
-
     struct aa_ct_state *ideal = aa_ct_state_alloc(cx->reg, n_q, 0);
     int r = aa_ct_seg_list_eval(cx->seg_list, ideal, reltime);
-    if (r == AA_CT_SEG_OUT) {
-        // We've also extended beyond past the end of the trajectory.
+
+    if (reltime >= aa_ct_seg_list_duration(cx->seg_list) ||
+        r == AA_CT_SEG_OUT) {
+        // We've extended beyond past the end of the trajectory. Reset and shoot a message to the
+        // the path sender.
+        struct msg_path_result result;
+        struct timespec now;
+        clock_gettime(ACH_DEFAULT_CLOCK, &now);
+        sns_msg_set_time(&result.header, &now, (int64_t)(1e9));
+        result.status = 0;
+        enum ach_status r = ach_put(&cx->finished_out, &result, sizeof(result));
+
+        // Setting the seg list to NULL will trigger the earlier check and only send one 'finished'
+        // message.
+        cx->seg_list = NULL;
+        cx->new_traj = false;
         return (ACH_OK);
     }
 

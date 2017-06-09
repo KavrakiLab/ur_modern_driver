@@ -1,0 +1,11 @@
+# The action to be performed: a joint waypoint to follow.
+# Note: In waypoints.points, velocities, accelerations, efforts, and time_from_start will all be
+# ignored.
+trajectory_msgs/JointTrajectory waypoints
+---
+# result true if successful, false if failed for some reason.
+bool result
+---
+# feedback, the current robot state.
+# Note: not implemented at the moment.
+trajectory_msgs/JointTrajectoryPoint current_state

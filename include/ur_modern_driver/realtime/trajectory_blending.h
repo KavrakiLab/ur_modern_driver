@@ -42,6 +42,15 @@
 #include <getopt.h>
 
 /**
+ * The reply message sent to the path sender when the path is finished executing.
+ */
+struct msg_path_result {
+    struct sns_msg_header header; // the message header, contains time sent.
+
+    int status; // the returned status. TODO: maybe make an enum for readability.
+};
+
+/**
  * The context needed for continually following a trajectory.
  */
 struct traj_follow_cx {
@@ -51,6 +60,9 @@ struct traj_follow_cx {
     /** The channel to send motor references to (ideally the actual robot driver). */
     struct sns_motor_channel *ref_out;
     struct sns_motor_ref_set *ref_set;
+
+    /** The channel to return the final trajectory status. */
+    struct ach_channel finished_out;
 
     /** The channel on which motor state in being recieved. */
     struct sns_motor_channel *state_in;

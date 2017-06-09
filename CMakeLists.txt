@@ -5,6 +5,7 @@ add_definitions( -DROS_BUILD )
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
 find_package(catkin REQUIRED COMPONENTS
+  actionlib_msgs
   hardware_interface
   controller_manager
   actionlib
@@ -68,17 +69,17 @@ set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 # )
 
 ## Generate actions in the 'action' folder
-# add_action_files(
-#   FILES
-#   Action1.action
-#   Action2.action
-# )
+add_action_files(
+  DIRECTORY action
+  FILES
+  FollowWaypoints.action
+)
 
 ## Generate added messages and services with any dependencies listed here
-# generate_messages(
-#   DEPENDENCIES
-#   control_msgs#   geometry_msgs#   sensor_msgs#   trajectory_msgs#   ur_msgs
-# )
+generate_messages(
+  DEPENDENCIES
+  actionlib_msgs std_msgs trajectory_msgs
+)
 
 ################################################
 ## Declare ROS dynamic reconfigure parameters ##
@@ -112,7 +113,7 @@ set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 catkin_package(
   INCLUDE_DIRS include
 #  LIBRARIES ur_modern_driver
-  CATKIN_DEPENDS hardware_interface controller_manager actionlib control_msgs geometry_msgs roscpp sensor_msgs trajectory_msgs ur_msgs
+  CATKIN_DEPENDS hardware_interface controller_manager actionlib actionlib_msgs control_msgs geometry_msgs roscpp sensor_msgs trajectory_msgs ur_msgs
   DEPENDS ur_hardware_interface
 )
 
@@ -188,6 +189,7 @@ target_link_libraries(ur_driver
 # Create realtime driver from modified ksim code.
 add_executable(ur_realtime_driver src/realtime/ur_realtime_driver.cpp)
 add_executable(ur_pblend src/realtime/trajectory_blending.cpp)
+add_executable(ros_realtime_interface src/realtime/ros_realtime_interface.cpp)
 
 find_library(ACH_LIBRARY ach)
 find_library(SNS_LIBRARY sns)
@@ -206,6 +208,12 @@ target_link_libraries(ur_realtime_driver ur_modern_driver ${SDL2_LIBRARY}
         blas ${BLAS_LIBRARIES})
 
 target_link_libraries(ur_pblend
+        ${ACH_LIBRARY}
+        ${SNS_LIBRARY}
+        ${AMINO_LIBRARY})
+
+target_link_libraries(ros_realtime_interface
+        ur_modern_driver
         ${ACH_LIBRARY}
         ${SNS_LIBRARY}
         ${AMINO_LIBRARY})
