@@ -293,7 +293,6 @@ enum ach_status command( struct cx *cx )
     }
 
     // Here we actually send commands to the real robot using the UrDriver class.
-    /*
     for (size_t i = 0; i != cx->robots.size(); i++) {
         if (have_q_ref[i] && have_dq_ref[i]) {
             // If we have both a position and velocity reference, send position, then velocity
@@ -309,7 +308,6 @@ enum ach_status command( struct cx *cx )
                                     cmd_vel[i][3], cmd_vel[i][4], cmd_vel[i][5], max_vel_change * 125);
         }
     }
-    */
 
     return ACH_OK;
 }

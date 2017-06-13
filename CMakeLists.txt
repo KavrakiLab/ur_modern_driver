@@ -138,7 +138,7 @@ endif()
 # include_directories(include)
 include_directories(include
   ${catkin_INCLUDE_DIRS}
-  ~/amino/include
+  ~/Desktop/amino/include
   ~/sns/include
 )
 

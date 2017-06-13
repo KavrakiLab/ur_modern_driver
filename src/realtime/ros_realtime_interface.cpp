@@ -41,6 +41,7 @@ public:
 
     pthread_mutex_t mutex;
     pthread_cond_t cond;
+    pthread_t finished_thread;
     bool is_finished = false;
 
 
@@ -55,7 +56,6 @@ public:
         pthread_mutex_init(&mutex, 0);
         pthread_cond_init(&cond, 0);
         // Setup a handler for the event loop in another thread.
-        pthread_t finished_thread;
         if (pthread_create(&finished_thread, NULL, listen_for_finished, this) ) {
             SNS_DIE("Could not create a listening thread: '%s'", strerror(errno));
         }
@@ -68,11 +68,12 @@ public:
         sns_end();
         pthread_mutex_destroy(&mutex);
         pthread_cond_destroy(&cond);
+        pthread_kill(finished_thread, 9);
     }
 
     void executeCB(const ur_modern_driver::FollowWaypointsGoalConstPtr &goal)
     {
-        ROS_INFO("%s: blending and following path with %u waypoints",
+        ROS_INFO("%s: blending and following path with %zu waypoints",
                 action_name_.c_str(), goal->waypoints.points.size());
 
         size_t n_dof = goal->waypoints.joint_names.size();
@@ -85,6 +86,13 @@ public:
                 path->x[i * n_dof + j] = goal->waypoints.points[i].positions[j];
             }
         }
+
+        for (int i = 0; i < n_steps; i++) {
+            for (int j = 0; j < n_dof; j++) {
+                printf("path->x[%d] = %f\n", j, path->x[i * n_dof + j]);
+            }
+        }
+
 
         // Send the struct to the blender.
         struct timespec now;
@@ -102,10 +110,12 @@ public:
 
         // Wait until the trajectory is finished, sleeping until then.
         pthread_mutex_lock(&mutex);
+        ROS_INFO("Waiting for condition variable to be signaled.");
         pthread_cond_wait(&cond, &mutex);
         is_finished = false;
         pthread_mutex_unlock(&mutex);
 
+        ROS_INFO("Signal variable was signaled, trajectory is finished.");
         result_.result = true;
         as_.setSucceeded(result_);
     }
@@ -126,6 +136,7 @@ protected:
 
 enum ach_status handle_finished(void *cx_, void *msg_, size_t msg_size)
 {
+    ROS_INFO("Recieved a finished message.");
     RosRealtimeInterface *rri = (RosRealtimeInterface *)cx_;
     pthread_mutex_lock(&rri->mutex);
     rri->is_finished = true;

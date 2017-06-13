@@ -25,6 +25,7 @@
 #include <stdbool.h>
 
 #include <amino.h>
+#include <amino/test.h>
 #include <amino/ct/state.h>
 #include <amino/ct/traj.h>
 #include <amino/rx/scenegraph.h>
@@ -97,11 +98,11 @@ struct traj_follow_cx {
  * The context needed for handling waypoint paths.
  */
 struct traj_blend_cx {
-    /** The limits of the robot for which the path is being blended. */
-    struct aa_ct_state *limits;
-
     /** The channel on which path messages are being recieved. */
     struct ach_channel path_in;
+
+    /** The limits of the robot for which the path is being blended. */
+    struct aa_ct_limit *limits;
 
     /**
      * Used to begin the process of trajectory following after the waypoints
