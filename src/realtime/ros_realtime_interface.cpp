@@ -87,13 +87,6 @@ public:
             }
         }
 
-        for (int i = 0; i < n_steps; i++) {
-            for (int j = 0; j < n_dof; j++) {
-                printf("path->x[%d] = %f\n", j, path->x[i * n_dof + j]);
-            }
-        }
-
-
         // Send the struct to the blender.
         struct timespec now;
         clock_gettime(ACH_DEFAULT_CLOCK, &now);
