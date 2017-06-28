@@ -131,9 +131,10 @@ int main(int argc, char **argv)
     }
 
     // Initialize all robots. There should be a host ip given for each robot to be connected to.
+    unsigned int rev_port = 50007; // If rev port is the same, we get an error when binding.
     for (auto host : hosts) {
-        auto robot = new UrDriver(cx.rt_msg_cond, cx.msg_cond, host);
-
+        auto robot = new UrDriver(cx.rt_msg_cond, cx.msg_cond, host, rev_port);
+        rev_port++; 
         if (!robot->start()) {
             SNS_DIE("Could not start robot driver for host %s", host.c_str());
         }
@@ -142,7 +143,7 @@ int main(int argc, char **argv)
     }
 
     /* Start GUI in main thread */
-    cx.win = aa_rx_win_default_create ( "sns-ksim", 800, 600 );
+    cx.win = aa_rx_win_default_create ( "ur realtime driver", 800, 600 );
     aa_rx_win_set_sg(cx.win, cx.scenegraph);
     sns_start();
     aa_rx_win_run();
@@ -224,6 +225,7 @@ enum ach_status command( struct cx *cx )
 
     double max_vel_change = 0.12;
 
+    int robot_idx = 0;
     for (auto robot : cx->robots) {
         // Initialize vectors to hold commanded positions, velocities.
         cmd_pos.push_back(std::vector<double>(UR5_JOINT_N, 0.0));
@@ -240,11 +242,12 @@ enum ach_status command( struct cx *cx )
         std::vector<double> vel = robot->rt_interface_->robot_state_->getQdActual();
 
         // Copy over real robot state to controller internals.
-        for (auto i = 0; i < cx->n_q; i++) {
-            *(state->q + i) = pos[i];
-            *(state->dq + i) = vel[i];
+        for (auto i = 0; i < pos.size(); i++) {
+            *(state->q  + (UR5_GRIPPER_JOINT_N * robot_idx) + i) = pos[i];
+            *(state->dq + (UR5_GRIPPER_JOINT_N * robot_idx) + i) = vel[i];
         }
-       robot->rt_interface_->robot_state_->setControllerUpdated();
+        robot->rt_interface_->robot_state_->setControllerUpdated();
+        robot_idx++;
     }
 
 
@@ -264,9 +267,10 @@ enum ach_status command( struct cx *cx )
          * split the appropriate position and velocity references to
          * command to the appropriate connected robot.
          */
-        size_t robot_num = i / UR5_JOINT_N;
-        size_t joint_num = i % UR5_JOINT_N;
-	if (robot_num + 1 > cx->robots.size())
+        size_t robot_num = i / UR5_GRIPPER_JOINT_N;
+        size_t joint_num = i % UR5_GRIPPER_JOINT_N;
+        // Out of robots or out of joints (we can't control the grippers from here). 
+	if (robot_num + 1 > cx->robots.size() || joint_num > UR5_JOINT_N)
             continue;
         if( aa_tm_cmp(now,m->expiration) < 0 ) {
             switch(m->mode) {

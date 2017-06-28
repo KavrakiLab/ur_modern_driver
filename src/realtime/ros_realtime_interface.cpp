@@ -123,8 +123,6 @@ protected:
     ur_modern_driver::FollowWaypointsResult result_;
 
     ach_channel_t channel_path;
-
-
 };
 
 enum ach_status handle_finished(void *cx_, void *msg_, size_t msg_size)

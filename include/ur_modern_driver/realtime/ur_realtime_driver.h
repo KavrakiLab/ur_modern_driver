@@ -44,6 +44,7 @@
 #include "../ur_driver.h"
 
 #define UR5_JOINT_N 6
+#define UR5_GRIPPER_JOINT_N 12
 
 struct cx {
     struct aa_rx_sg *scenegraph;

@@ -1,9 +1,6 @@
 #!/bin/bash
 ## A script that intializes the ach and sns setup needed to run on a single ur.
 
-# Defaults to using 192.168.0.19
-ipaddr=${1:192.168.0.19}
-
 ### Vars
 ACH_STATE="state"
 ACH_BLEND_REF="ref"
@@ -14,7 +11,7 @@ ACH_FINISHED_PATH="path_finished"
 ## ENV VARS
 source /home/kavrakilab/ur5_wksp/install/setup.bash
 source /home/kavrakilab/ur5_wksp/devel/setup.bash
-export SNS_SCENE_PLUGIN=libkavrakilab-one-arm-scene.so
+export SNS_SCENE_PLUGIN=libkavrakilab-two-arm-scene.so
 export SNS_SCENE_NAME=kavrakilab
 
 ### Init
@@ -31,10 +28,11 @@ sleep 1
 rosrun ur_modern_driver ur_realtime_driver -y $ACH_STATE \
 	-u $ACH_BLEND_REF -p 1\
         -u $ACH_WD_REF -p 10\
-	-r ipaddr &
+        -r 192.168.0.20\ # Needs to be in this order
+	-r 192.168.0.19 &
 sleep 5 # wait for it to start
 sns-pblend -y $ACH_STATE -u $ACH_BLEND_REF -w $ACH_FOLLOW_PATH -f $ACH_FINISHED_PATH &
-sleep 1
+sleep 5
 sns-watchdog -y $ACH_STATE -j $ACH_BLEND_REF -u $ACH_WD_REF &
 sleep 1
 rosrun ur_modern_driver ros_realtime_interface &

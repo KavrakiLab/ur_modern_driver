@@ -4,6 +4,9 @@ add_definitions( -DROS_BUILD )
 ## Find catkin macros and libraries
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
+
+list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
+
 find_package(catkin REQUIRED COMPONENTS
   actionlib_msgs
   hardware_interface
@@ -18,6 +21,9 @@ find_package(catkin REQUIRED COMPONENTS
   ur_msgs
   tf
 )
+
+find_package(AMINO REQUIRED)
+find_package(SNS REQUIRED)
 
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 
@@ -138,8 +144,8 @@ endif()
 # include_directories(include)
 include_directories(include
   ${catkin_INCLUDE_DIRS}
-  ~/Desktop/amino/include
-  ~/sns/include
+  ${AMINO_INCLUDE_DIRS}
+  ${SNS_INCLUDE_DIRS}
 )
 
 # Amino requires SDL
@@ -192,8 +198,6 @@ add_executable(ur_pblend src/realtime/trajectory_blending.cpp)
 add_executable(ros_realtime_interface src/realtime/ros_realtime_interface.cpp)
 
 find_library(ACH_LIBRARY ach)
-find_library(SNS_LIBRARY sns)
-find_library(AMINO_LIBRARY amino)
 find_library(AMINO_GL_LIBRARY amino-gl)
 
 if (NOT ACH_LIBRARY OR NOT SNS_LIBRARY OR NOT AMINO_LIBRARY OR NOT AMINO_GL_LIBRARY)

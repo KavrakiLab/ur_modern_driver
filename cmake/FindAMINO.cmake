@@ -1,0 +1,12 @@
+include(FindPackageHandleStandardArgs)
+find_package(PkgConfig)
+if(PKGCONFIG_FOUND)
+    pkg_check_modules(AMINO amino>=0.3.1)
+    if(AMINO_LIBRARIES AND NOT AMINO_INCLUDE_DIRS)
+        set(AMINO_INCLUDE_DIRS "/usr/local/include/amino-1.0")
+    endif()
+    find_library(AMINO_LIBRARY amino)
+endif()
+message("Found Amino: ${AMINO_INCLUDE_DIRS}, ${AMINO_LIBRARIES}")
+find_package_handle_standard_args(AMINO DEFAULT_MSG AMINO_LIBRARIES AMINO_INCLUDE_DIRS)
+

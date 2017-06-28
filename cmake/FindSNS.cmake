@@ -1,0 +1,16 @@
+include(FindPackageHandleStandardArgs)
+find_package(PkgConfig)
+## For the moment, SNS does not provide a sns.pc file.
+#if(PKGCONFIG_FOUND)
+#    pkg_check_modules(SNS sns>=0.0.0)
+#    if (SNS_LIBRARIES AND NOT SNS_INCLUDE_DIRS)
+#        set(SNS_INCLUDE_DIRS "/usr/local/include")
+#    endif()
+#else()
+    set(SNS_INCLUDE_DIRS "/usr/local/include/sns")
+    find_library(SNS_LIBRARY sns)
+    set(SNS_LIBRARIES ${SNS_LIBRARY})
+#endif()
+
+message("Found SNS: ${SNS_INCLUDE_DIRS}, ${SNS_LIBRARIES}")
+find_package_handle_standard_args(SNS DEFAULT_MSG SNS_LIBRARIES SNS_INCLUDE_DIRS)
