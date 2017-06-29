@@ -194,7 +194,6 @@ target_link_libraries(ur_driver
 
 # Create realtime driver from modified ksim code.
 add_executable(ur_realtime_driver src/realtime/ur_realtime_driver.cpp)
-add_executable(ur_pblend src/realtime/trajectory_blending.cpp)
 add_executable(ros_realtime_interface src/realtime/ros_realtime_interface.cpp)
 
 find_library(ACH_LIBRARY ach)
@@ -211,11 +210,6 @@ target_link_libraries(ur_realtime_driver ur_modern_driver ${SDL2_LIBRARY}
         ${AMINO_GL_LIBRARY}
         blas ${BLAS_LIBRARIES})
 
-target_link_libraries(ur_pblend
-        ${ACH_LIBRARY}
-        ${SNS_LIBRARY}
-        ${AMINO_LIBRARY})
-
 target_link_libraries(ros_realtime_interface
         ur_modern_driver
         ${ACH_LIBRARY}
@@ -229,7 +223,7 @@ target_link_libraries(ros_realtime_interface
 install(DIRECTORY launch/ DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/launch)
 
 ## Mark executables and/or libraries for installation
-install(TARGETS ur_driver ur_hardware_interface ur_modern_driver ur_realtime_driver ur_pblend
+install(TARGETS ur_driver ur_hardware_interface ur_modern_driver ur_realtime_driver 
   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

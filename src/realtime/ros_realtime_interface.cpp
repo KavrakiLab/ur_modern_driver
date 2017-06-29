@@ -21,6 +21,7 @@
 #include <ros/ros.h>
 #include <sns.h>
 #include <sns/event.h>
+#include <sns/path.h>
 #include <ach.h>
 #include <pthread.h>
 #include <poll.h>

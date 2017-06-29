@@ -250,7 +250,6 @@ enum ach_status command( struct cx *cx )
         robot_idx++;
     }
 
-
     /* Collect references */
     sns_motor_ref_collate(&cx->t, cx->ref_set);
 
