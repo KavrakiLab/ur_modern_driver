@@ -1,5 +1,7 @@
 <launch>
 
-  <node pkg="ur_modern_driver" type="combine_joint_states.py" name="combine_joint_states" output="screen"/>
+  <node name="joint_state_publisher" pkg="joint_state_publisher" type="joint_state_publisher">
+    <rosparam param="source_list">[left_manipulator/joint_states, right_manipulator/joint_states, left_gripper/joint_states, right_gripper/joint_states]</rosparam>
+  </node>
 
 </launch>
