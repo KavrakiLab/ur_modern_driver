@@ -8,10 +8,8 @@ add_definitions( -DROS_BUILD )
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 
 find_package(catkin REQUIRED COMPONENTS
-  actionlib_msgs
   hardware_interface
   controller_manager
-  actionlib
   control_msgs
   geometry_msgs
   roscpp
@@ -24,8 +22,6 @@ find_package(catkin REQUIRED COMPONENTS
 
 find_package(AMINO REQUIRED)
 find_package(SNS REQUIRED)
-
-set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
@@ -75,17 +71,17 @@ set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 # )
 
 ## Generate actions in the 'action' folder
-add_action_files(
-  DIRECTORY action
-  FILES
-  FollowWaypoints.action
-)
+#add_action_files(
+#  DIRECTORY action
+#  FILES
+#  FollowWaypoints.action
+#)
 
 ## Generate added messages and services with any dependencies listed here
-generate_messages(
-  DEPENDENCIES
-  actionlib_msgs std_msgs trajectory_msgs
-)
+#generate_messages(
+#  DEPENDENCIES
+#  actionlib_msgs std_msgs trajectory_msgs
+#)
 
 ################################################
 ## Declare ROS dynamic reconfigure parameters ##
@@ -119,7 +115,7 @@ generate_messages(
 catkin_package(
   INCLUDE_DIRS include
 #  LIBRARIES ur_modern_driver
-  CATKIN_DEPENDS hardware_interface controller_manager actionlib actionlib_msgs control_msgs geometry_msgs roscpp sensor_msgs trajectory_msgs ur_msgs
+  CATKIN_DEPENDS hardware_interface controller_manager control_msgs geometry_msgs roscpp sensor_msgs trajectory_msgs ur_msgs
   DEPENDS ur_hardware_interface
 )
 
@@ -194,7 +190,6 @@ target_link_libraries(ur_driver
 
 # Create realtime driver from modified ksim code.
 add_executable(ur_realtime_driver src/realtime/ur_realtime_driver.cpp)
-add_executable(ros_realtime_interface src/realtime/ros_realtime_interface.cpp)
 
 find_library(ACH_LIBRARY ach)
 find_library(AMINO_GL_LIBRARY amino-gl)
@@ -209,12 +204,6 @@ target_link_libraries(ur_realtime_driver ur_modern_driver ${SDL2_LIBRARY}
         ${AMINO_LIBRARY}
         ${AMINO_GL_LIBRARY}
         blas ${BLAS_LIBRARIES})
-
-target_link_libraries(ros_realtime_interface
-        ur_modern_driver
-        ${ACH_LIBRARY}
-        ${SNS_LIBRARY}
-        ${AMINO_LIBRARY})
 
 #############
 ## Install ##
