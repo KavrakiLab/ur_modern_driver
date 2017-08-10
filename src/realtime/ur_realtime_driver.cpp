@@ -32,16 +32,20 @@ int main(int argc, char **argv)
     const double opt_sim_frequecy = 100;
     struct sns_motor_channel *last_mc = NULL;
     std::vector<std::string> hosts;
+    bool use_window = true;
 
     /* Parse Options */
     {
         int c = 0;
         opterr = 0;
-        while( (c = getopt( argc, argv, "y:u:p:r:h?" SNS_OPTSTRING)) != -1 ) {
+        while( (c = getopt( argc, argv, "xy:u:p:r:h?" SNS_OPTSTRING)) != -1 ) {
             switch(c) {
-                SNS_OPTCASES_VERSION("sns-ksim",
+                SNS_OPTCASES_VERSION("ur_realtime_driver",
                                      "Copyright (c) 2017, Rice University\n",
-                                     "Neil T. Dantam")
+                                     "William Cannon Lewis")
+                case 'x':
+                    use_window = false;
+                    break;
                 case 'y':
                     sns_motor_channel_push( optarg, &cx.state_out );
                     last_mc = cx.state_out;
@@ -62,10 +66,11 @@ int main(int argc, char **argv)
                     break;
                 case '?':   /* help     */
                 case 'h':
-                    puts( "Usage: sns-ksim -u REF_CHANNEL -y STATE_CHANNEL\n"
-                                  "Kinematically simulate a robot.\n"
+                    puts( "Usage: ur_realtime_driver -u REF_CHANNEL -y STATE_CHANNEL\n"
+                                  "Run SNS on the real UR5s.\n"
                                   "\n"
                                   "Options:\n"
+                                  "  -x,                       if present, turns off the simulator window.\n"
                                   "  -y <channel>,             state output channel\n"
                                   "  -u <channel>,             reference input channel\n"
                                   "  -p <priority>,            channel priority\n"
@@ -81,13 +86,13 @@ int main(int argc, char **argv)
                                   "  SNS_CHANNEL_MAP_name      Channel remap list for `name'\n"
                                   "\n"
                                   "Examples:\n"
-                                  "  sns-ksim -y state -u ref -r 192.168.0.19\n"
+                                  "  ur_realtime_driver -y state -u ref -r 192.168.0.19\n"
                                   "\n"
-                                  "Report bugs to <ntd@rice.edu>"
+                                  "Report bugs to <bsw2@rice.edu>"
                     );
                     exit(EXIT_SUCCESS);
                 default:
-                SNS_DIE("Unknown Option: `%c'\n", c);
+                    SNS_DIE("Unknown Option: `%c'\n", c);
                     break;
             }
         }
@@ -123,13 +128,6 @@ int main(int argc, char **argv)
     SNS_LOG( LOG_DEBUG, "Simulation Period: %lus + %ldns\n",
              cx.period.tv_sec, cx.period.tv_nsec );
 
-
-    /* Start threads */
-    pthread_t io_thread;
-    if( pthread_create(&io_thread, NULL, io_start, &cx) ) {
-        SNS_DIE("Could not create simulation thread: `%s'", strerror(errno));
-    }
-
     // Initialize all robots. There should be a host ip given for each robot to be connected to.
     unsigned int rev_port = 50007; // If rev port is the same, we get an error when binding.
     for (auto host : hosts) {
@@ -142,20 +140,32 @@ int main(int argc, char **argv)
         cx.robots.push_back(robot);
     }
 
-    /* Start GUI in main thread */
-    cx.win = aa_rx_win_default_create ( "ur realtime driver", 800, 600 );
-    aa_rx_win_set_sg(cx.win, cx.scenegraph);
     sns_start();
-    aa_rx_win_run();
 
-    /* Stop threads */
-    sns_cx.shutdown = 1;
-    if( pthread_join(io_thread, NULL) ) {
-        SNS_LOG(LOG_ERR, "Could not join simulation thread: `%s'", strerror(errno));
+
+    /* Start threads */
+    if (use_window) {
+        pthread_t io_thread;
+        if( pthread_create(&io_thread, NULL, io_start, &cx) ) {
+            SNS_DIE("Could not create simulation thread: `%s'", strerror(errno));
+        }
+
+        /* Start GUI in main thread */
+        cx.win = aa_rx_win_default_create ( "ur realtime driver", 800, 600 );
+        aa_rx_win_set_sg(cx.win, cx.scenegraph);
+        aa_rx_win_run();
+
+        /* Stop threads */
+        sns_cx.shutdown = 1;
+        if( pthread_join(io_thread, NULL) ) {
+            SNS_LOG(LOG_ERR, "Could not join simulation thread: `%s'", strerror(errno));
+        }
+    } else {
+        cx.win = NULL;
+        io(&cx);
     }
+
     sns_end();
-
-
 
     return 0;
 }
@@ -173,7 +183,7 @@ void io(struct cx *cx) {
                                       sns_sig_term_default,
                                       ACH_EV_O_PERIODIC_TIMEOUT );
     SNS_REQUIRE( sns_cx.shutdown || (ACH_OK == r),
-                 "Could asdf not handle events: %s, %s\n",
+                 "Could not handle events: %s, %s\n",
                  ach_result_to_string(r),
                  strerror(errno) );
 
@@ -192,7 +202,7 @@ enum ach_status io_periodic( void *cx_ )
 
     /* Post state */
     struct aa_ct_state *state = sns_motor_state_get(cx->state_set);
-    sns_motor_state_put( cx->state_set, &cx->t, (int64_t)1e9 );
+    sns_motor_state_put( cx->state_set, &cx->t, (int64_t)2e9 );
 
     /* Update display */
     if( cx->win ) aa_rx_win_set_config( cx->win, state->n_q, state->q );
