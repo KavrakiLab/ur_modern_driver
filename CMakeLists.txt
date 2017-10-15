@@ -210,6 +210,7 @@ target_link_libraries(ur_realtime_driver ur_modern_driver ${SDL2_LIBRARY}
 #############
 
 install(DIRECTORY launch/ DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/launch)
+install(DIRECTORY config/ DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/config)
 
 ## Mark executables and/or libraries for installation
 install(TARGETS ur_driver ur_hardware_interface ur_modern_driver ur_realtime_driver 
