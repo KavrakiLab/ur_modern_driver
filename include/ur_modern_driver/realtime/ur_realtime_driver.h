@@ -58,6 +58,7 @@ struct cx {
     struct timespec t;
 
     size_t n_q;
+    double *last_sent;
     uint64_t seq;
 
     struct aa_rx_win * win;

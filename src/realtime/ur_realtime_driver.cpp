@@ -23,13 +23,17 @@
 #endif
 
 #include "ur_modern_driver/realtime/ur_realtime_driver.h"
+#include <amino/math.h>
+
+
+int print_restrict_count = 0;
 
 int main(int argc, char **argv)
 {
     struct cx cx;
     AA_MEM_ZERO(&cx,1);
 
-    const double opt_sim_frequecy = 100;
+    const double opt_sim_frequecy = 250;
     struct sns_motor_channel *last_mc = NULL;
     std::vector<std::string> hosts;
     bool use_window = true;
@@ -119,7 +123,7 @@ int main(int argc, char **argv)
                            n_ref, cx.handlers);
     }
 
-    SNS_LOG(LOG_INFO, "Simulation Frequency: %.3fkHz\n", opt_sim_frequecy/1e3);
+    printf("Simulation Frequency: %.3fkHz\n", opt_sim_frequecy/1e3);
     long period_ns = (long)(1e9 / opt_sim_frequecy);
 
     cx.period.tv_sec = (time_t)period_ns / (time_t)1e9;
@@ -127,6 +131,8 @@ int main(int argc, char **argv)
 
     SNS_LOG( LOG_DEBUG, "Simulation Period: %lus + %ldns\n",
              cx.period.tv_sec, cx.period.tv_nsec );
+
+    cx.last_sent = (double *)malloc(sizeof(double) * cx.n_q);
 
     // Initialize all robots. There should be a host ip given for each robot to be connected to.
     unsigned int rev_port = 50007; // If rev port is the same, we get an error when binding.
@@ -178,6 +184,7 @@ void* io_start(void *cx) {
 
 void io(struct cx *cx) {
     /* Run Loop */
+    printf("Starting ur driver.\n");
     enum ach_status r = sns_evhandle( cx->handlers, sns_motor_channel_count(cx->ref_in),
                                       &cx->period, io_periodic, cx,
                                       sns_sig_term_default,
@@ -233,7 +240,7 @@ enum ach_status command( struct cx *cx )
     std::vector<std::vector<double>> cmd_pos;
     std::vector<std::vector<double>> cmd_vel;
 
-    double max_vel_change = 0.12;
+    double max_vel_change = 0.7;
 
     int robot_idx = 0;
     for (auto robot : cx->robots) {
@@ -264,12 +271,33 @@ enum ach_status command( struct cx *cx )
     sns_motor_ref_collate(&cx->t, cx->ref_set);
 
     /* Process References */
-    assert(cx->n_q == cx->ref_set->n_q );
+    assert(cx->n_q == cx->ref_set->n_q);
+
+    bool dont_send = true;
+    for (size_t i = 0; i < cx->ref_set->n_q; i++) {
+        if (!aa_feq(cx->ref_set->u[i], 0.0, 0.0000005) &&
+             aa_feq(cx->last_sent[i], 0.0, 0.0000005)) {
+            dont_send = false;
+        } else if (!aa_feq(cx->last_sent[i], 0.0, 0.0000005)) {
+            dont_send = false;
+        }
+    }
+    if (dont_send) {
+        if (print_restrict_count++ % 1000 == 1) {
+	    fprintf(stdout, "Two motor commands equal 0. Not sending next command, calling stop instead.\n");  
+        }
+        for (size_t i = 0; i < cx->robots.size(); i++) {
+            cx->robots[i]->stopTraj();
+        }
+        return ACH_OK;
+    }
+
     for( size_t i = 0; i < cx->ref_set->n_q; i ++ ) {
         struct sns_motor_ref_meta *m = cx->ref_set->meta+i;
         double u = cx->ref_set->u[i];
         double *q = state->q+i;
         double *dq = state->dq+i;
+
 
         /**
          * Since we iterate over all joints in the scenegraph, we must
@@ -305,20 +333,25 @@ enum ach_status command( struct cx *cx )
         }
     }
 
+    for (size_t i = 0; i < cx->ref_set->n_q; i++) {
+        cx->last_sent[i] = cx->ref_set->u[i];
+    }
+
     // Here we actually send commands to the real robot using the UrDriver class.
     for (size_t i = 0; i != cx->robots.size(); i++) {
         if (have_q_ref[i] && have_dq_ref[i]) {
             // If we have both a position and velocity reference, send position, then velocity
+            fprintf(stdout, "We have both a position and a velocity reference, this is weird.\n");
             cx->robots[i]->servoj(cmd_pos[i]);
             cx->robots[i]->setSpeed(cmd_vel[i][0], cmd_vel[i][1], cmd_vel[i][2],
-                    cmd_vel[i][3], cmd_vel[i][4], cmd_vel[i][5], max_vel_change * 125);
+                                    cmd_vel[i][3], cmd_vel[i][4], cmd_vel[i][5], max_vel_change);
         } else if (have_q_ref[i]) {
             // We only send a position reference to the robot.
             cx->robots[i]->servoj(cmd_pos[i]);
         } else if (have_dq_ref[i]) {
             // We only send a velocity reference to the robot.
             cx->robots[i]->setSpeed(cmd_vel[i][0], cmd_vel[i][1], cmd_vel[i][2],
-                                    cmd_vel[i][3], cmd_vel[i][4], cmd_vel[i][5], max_vel_change * 125);
+                                    cmd_vel[i][3], cmd_vel[i][4], cmd_vel[i][5], max_vel_change);
         }
     }
 
