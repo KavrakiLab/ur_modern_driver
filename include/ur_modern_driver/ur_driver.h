@@ -30,10 +30,11 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include "class_forward.h"
 
 #include <chrono>
 
-
+CLASS_FORWARD(UrDriver);
 class UrDriver {
 private:
 	double maximum_time_step_;

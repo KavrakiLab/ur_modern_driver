@@ -63,7 +63,7 @@
 #include <hardware_interface/force_torque_sensor_interface.h>
 #include <hardware_interface/robot_hw.h>
 #include <controller_manager/controller_manager.h>
-#include <boost/scoped_ptr.hpp>
+#include "class_forward.h"
 #include <ros/ros.h>
 #include <math.h>
 #include "do_output.h"
@@ -74,6 +74,8 @@ namespace ros_control_ur {
 // For simulation only - determines how fast a trajectory is followed
 static const double POSITION_STEP_FACTOR = 1;
 static const double VELOCITY_STEP_FACTOR = 1;
+
+CLASS_FORWARD(UrHandwareInterface);
 
 /// \brief Hardware interface for a robot
 class UrHardwareInterface: public hardware_interface::RobotHW {
