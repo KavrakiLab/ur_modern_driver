@@ -56,6 +56,11 @@
 #include <tf/tf.h>
 #include <tf/transform_broadcaster.h>
 
+// A value used as an additional macro for result_.error_code,
+// which is set to this upon reciving a request, and only changed when
+// all robots finish successfully, or one fails.
+#define WAITING 2
+
 class RosWrapperDouble
 {
 protected:
@@ -71,9 +76,11 @@ protected:
     /// Action Server related members.
     actionlib::ActionServer<control_msgs::FollowJointTrajectoryAction> as_;
     actionlib::ServerGoalHandle<control_msgs::FollowJointTrajectoryAction> goal_handle_;
-    bool has_goal_;
+    // TODO(brycew): on the original ThomasTimm repo, PR 101 adds some mutexes to protect has_goal_.
+    // Since this gets even more complicated with a vector, adapt these changes to this code.
+    std::vector<bool> has_goal_; // Whether each robot has a goal set/ has already reached that goal
     control_msgs::FollowJointTrajectoryFeedback feedback_;
-    control_msgs::FollowJointTrajectoryResult result_;
+    control_msgs::FollowJointTrajectoryResult result_; 
 
     ros::Subscriber speed_sub_;
     ros::Subscriber urscript_sub_;
@@ -86,7 +93,7 @@ protected:
     std::thread *mb_publish_thread_;
     double io_flag_delay_;
     double max_velocity_;
-    std::vector<double> joint_offsets_;
+    std::vector<double> joint_offsets_; // Adjusts the positions of joint i by joint_offsets_[i]
     std::string base_frame_;
     std::string tool_frame_;
     bool use_ros_control_;
@@ -113,6 +120,8 @@ public:
             robots_.push_back(robot);
             reverse_port += 1;
         }
+         
+        // TODO(brycew): make this be two prefixes
         std::string joint_prefix = "";
         std::vector<std::string> joint_names;
         char buf[256];
@@ -244,14 +253,17 @@ public:
         {
             if (use_ros_control_)
             {
-                // TODO: launch one per robot?
+                // TODO(brycew): launch one per robot?
                 ros_control_thread_ = new std::thread(boost::bind(&RosWrapper::rosControlLoop, this));
                 print_debug("The control thread for this driver has been started");
             }
             else
             {
                 // start actionserver
-                has_goal_ = false;
+                for (int i = 0; i < robots_size(); i++)
+                {
+                    has_goal_.push_back(false);
+                }
                 as_.start();
 
                 // subscribe to the data topic of interest
@@ -285,26 +297,55 @@ public:
 
     void halt()
     {
-        robot_.halt();
+        for (auto robot : robots_)
+            robot.halt();
         rt_publish_thread_->join();
     }
 
 private:
-    void trajThread(std::vector<double> timestamps, std::vector<std::vector<double>> positions,
-                    std::vector<std::vector<double>> velocities)
+    /**
+     * Gets if any robots are still executing paths from the action server.
+     * Just a simple OR union over the has_goal_ vector.
+     */
+    bool any_executing()
     {
-        robot_.doTraj(timestamps, positions, velocities);
-        if (has_goal_)
+        return std::accumulate(has_goal_.start(), has_goal_.end(),
+                               false, [](bool a, bool b) { return a || b; }); 
+    }
+
+    void stop_all_robots()
+    {
+        for (size_t i = 0; i < robots_.size(); i++)
         {
-            result_.error_code = result_.SUCCESSFUL;
-            goal_handle_.setSucceeded(result_);
-            has_goal_ = false;
+            robots_[i].stopTraj();
+            has_goal_[i] = false;
         }
     }
+
+    void trajThread(std::vector<double> timestamps, std::vector<std::vector<double>> positions,
+                    std::vector<std::vector<double>> velocities, size_t robot_idx)
+    {
+        // TODO(brycew): Before calling this, the traj needs to be split into the positions/velocities for robot i.
+        robots_[robot_idx].doTraj(timestamps, positions, velocities);
+    
+        // Gets the number of remaining robots that need to complete goals.
+        bool remaining = std::accumulate(has_goal_.start(), has_goal_.end(),
+                                   0, [](int a, bool b) { return a + (b) ? 1 : 0; });
+        if (remaining == 1 && has_goal_[robot_idx_])
+        {
+            // If this is the last robot to reach it's goal
+            // TODO(brycew): do we need to check if result_ is already failing? What do we do if that is the case?
+            result_.error_code = result_.SUCCESSFUL;
+            goal_handle_.setSucceeded(result_);
+        }
+        has_goal_[robot_idx] = false;
+    }
+
     void goalCB(actionlib::ServerGoalHandle<control_msgs::FollowJointTrajectoryAction> gh)
     {
         std::string buf;
         print_info("on_goal");
+        // TODO(brycew): make all of these checks be for all robots.
         if (!robot_.sec_interface_->robot_state_->isReady())
         {
             result_.error_code = -100;  // nothing is defined for this...?
@@ -348,12 +389,12 @@ private:
 
         actionlib::ActionServer<control_msgs::FollowJointTrajectoryAction>::Goal goal =
             *gh.getGoal();  // make a copy that we can modify
-        if (has_goal_)
+
+        if (any_executing())
         {
             print_warning("Received new goal while still executing previous trajectory. Canceling previous "
                           "trajectory");
-            has_goal_ = false;
-            robot_.stopTraj();
+            stop_all_robots();
             result_.error_code = -100;  // nothing is defined for this...?
             result_.error_string = "Received another trajectory";
             goal_handle_.setAborted(result_, result_.error_string);
@@ -421,6 +462,8 @@ private:
             return;
         }
 
+        // TODO(brycew): split the trajectory into the separate sections for each robot here.
+        // Still precompute outside of the loop that spawns threads so the threads can be started at the same time.
         std::vector<double> timestamps;
         std::vector<std::vector<double>> positions, velocities;
         if (goal.trajectory.points[0].time_from_start.toSec() != 0.)
@@ -428,6 +471,7 @@ private:
             print_warning("Trajectory's first point should be the current position, with time_from_start set "
                           "to 0.0 - Inserting point in malformed trajectory");
             timestamps.push_back(0.0);
+            // TODO(brycew): get the Q and Qd actual from all robots.
             positions.push_back(robot_.rt_interface_->robot_state_->getQActual());
             velocities.push_back(robot_.rt_interface_->robot_state_->getQdActual());
         }
@@ -439,20 +483,25 @@ private:
         }
 
         goal_handle_.setAccepted();
-        has_goal_ = true;
-        std::thread(&RosWrapper::trajThread, this, timestamps, positions, velocities).detach();
+        for (size_t i = 0; i < robots_.size(); i++)
+        {
+            has_goal_[i] = true;
+            // TODO(brycew): access the precomputed sections of the trajectory here.
+            std::vector<std::vector<double> > robot_i_positions; // ...
+            std::vector<std::vector<double> > robot_i_velocities; // ...
+            std::thread(&RosWrapper::trajThread, this, timestamps, robot_i_positions, robot_i_velocites).detach();
+        }
     }
 
     void cancelCB(actionlib::ServerGoalHandle<control_msgs::FollowJointTrajectoryAction> gh)
     {
         // set the action state to preempted
         print_info("on_cancel");
-        if (has_goal_)
+        if (any_executing())
         {
             if (gh == goal_handle_)
             {
-                robot_.stopTraj();
-                has_goal_ = false;
+                stop_all_robots();
             }
         }
         result_.error_code = -100;  // nothing is defined for this...?
@@ -460,50 +509,72 @@ private:
         gh.setCanceled(result_);
     }
 
+    /**
+     * Change for double branch: Just sets the IO for all of the robots controlled.
+     */
     bool setIO(ur_msgs::SetIORequest &req, ur_msgs::SetIOResponse &resp)
     {
         resp.success = true;
-        // if (req.fun == ur_msgs::SetIO::Request::FUN_SET_DIGITAL_OUT) {
-        if (req.fun == 1)
+        for (auto robot : robots_)
         {
-            robot_.setDigitalOut(req.pin, req.state > 0.0 ? true : false);
-        }
-        else if (req.fun == 2)
-        {
-            //} else if (req.fun == ur_msgs::SetIO::Request::FUN_SET_FLAG) {
-            robot_.setFlag(req.pin, req.state > 0.0 ? true : false);
-            // According to urdriver.py, set_flag will fail if called to rapidly in succession
-            ros::Duration(io_flag_delay_).sleep();
-        }
-        else if (req.fun == 3)
-        {
-            //} else if (req.fun == ur_msgs::SetIO::Request::FUN_SET_ANALOG_OUT) {
-            robot_.setAnalogOut(req.pin, req.state);
-        }
-        else if (req.fun == 4)
-        {
-            //} else if (req.fun == ur_msgs::SetIO::Request::FUN_SET_TOOL_VOLTAGE) {
-            robot_.setToolVoltage((int)req.state);
-        }
-        else
-        {
-            resp.success = false;
+            // if (req.fun == ur_msgs::SetIO::Request::FUN_SET_DIGITAL_OUT) {
+            if (req.fun == 1)
+            {
+                robot.setDigitalOut(req.pin, req.state > 0.0 ? true : false);
+            }
+            else if (req.fun == 2)
+            {
+                //} else if (req.fun == ur_msgs::SetIO::Request::FUN_SET_FLAG) {
+                robot.setFlag(req.pin, req.state > 0.0 ? true : false);
+                // According to urdriver.py, set_flag will fail if called to rapidly in succession
+                ros::Duration(io_flag_delay_).sleep();
+            }
+            else if (req.fun == 3)
+            {
+                //} else if (req.fun == ur_msgs::SetIO::Request::FUN_SET_ANALOG_OUT) {
+                robot.setAnalogOut(req.pin, req.state);
+            }
+            else if (req.fun == 4)
+            {
+                //} else if (req.fun == ur_msgs::SetIO::Request::FUN_SET_TOOL_VOLTAGE) {
+                robot.setToolVoltage((int)req.state);
+            }
+            else
+            {
+                resp.success = false;
+                break;
+            }
         }
         return resp.success;
     }
 
+    /**
+     * Change for double branch: Just set the payload for all of the robots controlled.
+     */
     bool setPayload(ur_msgs::SetPayloadRequest &req, ur_msgs::SetPayloadResponse &resp)
     {
-        if (robot_.setPayload(req.payload))
-            resp.success = true;
-        else
-            resp.success = true;
+        for (auto robot : robots_)
+        {
+            // Note(brycew): This code intentionally returns true in both cases, it's the same in ur_ros_wrapper.
+            // No clear explaination of why in the commit log.
+            // robot.setPayload() only fails if the requested val is out of the range set in the constructor.
+            if (robot.setPayload(req.payload))
+                resp.success = true;
+            else
+                resp.success = true;
+        }
         return resp.success;
     }
 
     bool validateJointNames()
     {
-        std::vector<std::string> actual_joint_names = robot_.getJointNames();
+        std::vector<std::string> actual_joint_names;
+        actual_joint_names.reserve(robots_size() * robots_[0].getJointNames().size());
+        for (auto robot : robots_)
+        {
+            std::vector<std::string> joints = robot.getJointNames();
+            actual_joint_names.insert(actual_joint_names.end(), joints.start(), joints.end());
+        } 
         actionlib::ActionServer<control_msgs::FollowJointTrajectoryAction>::Goal goal =
             *goal_handle_.getGoal();
         if (goal.trajectory.joint_names.size() != actual_joint_names.size())
@@ -533,7 +604,13 @@ private:
     void reorder_traj_joints(trajectory_msgs::JointTrajectory &traj)
     {
         /* Reorders trajectory - destructive */
-        std::vector<std::string> actual_joint_names = robot_.getJointNames();
+        std::vector<std::string> actual_joint_names; 
+        actual_joint_names.reserve(robots_size() * robots_[0].getJointNames().size());
+        for (auto robot : robots_)
+        {
+            std::vector<std::string> joints = robot.getJointNames();
+            actual_joint_names.insert(actual_joint_names.end(), joints.start(), joints.end());
+        } 
         std::vector<unsigned int> mapping;
         mapping.resize(actual_joint_names.size(), actual_joint_names.size());
         for (unsigned int i = 0; i < traj.joint_names.size(); i++)
@@ -566,6 +643,8 @@ private:
     {
         actionlib::ActionServer<control_msgs::FollowJointTrajectoryAction>::Goal goal =
             *goal_handle_.getGoal();
+        if (goal.trajectory.poinst.size() == 0)
+            return false;
         for (unsigned int i = 0; i < goal.trajectory.points.size(); i++)
         {
             if (goal.trajectory.points[i].positions.size() != goal.trajectory.points[i].velocities.size())
@@ -592,6 +671,7 @@ private:
     {
         for (unsigned int i = 0; i < traj.points[0].positions.size(); i++)
         {
+            // TODO(brycew): match the start state of each robot.
             std::vector<double> qActual = robot_.rt_interface_->robot_state_->getQActual();
             if (fabs(traj.points[0].positions[i] - qActual[i]) > eps)
             {
@@ -635,17 +715,21 @@ private:
 
     void speedInterface(const trajectory_msgs::JointTrajectory::Ptr &msg)
     {
+        // TODO(brycew): should this always be set to 6? should we let different URs have different speeds?
         if (msg->points[0].velocities.size() == 6)
         {
             double acc = 100;
             if (msg->points[0].accelerations.size() > 0)
                 acc = *std::max_element(msg->points[0].accelerations.begin(),
                                         msg->points[0].accelerations.end());
+            // TODO(brycew): based on above choice, set the correct speeds for all robots.
             robot_.setSpeed(msg->points[0].velocities[0], msg->points[0].velocities[1],
                             msg->points[0].velocities[2], msg->points[0].velocities[3],
                             msg->points[0].velocities[4], msg->points[0].velocities[5], acc);
         }
     }
+
+    // TODO(brycew): best way would be to make a separate server part for each UR, so we'd get an index in this call.
     void urscriptInterface(const std_msgs::String::ConstPtr &msg)
     {
         robot_.rt_interface_->addCommandToQueue(msg->data);
@@ -711,7 +795,7 @@ private:
             print_info(buf);
             sprintf(buf, "MAXIMUM REACHED, TOTAL VALUE = %f", total_current);
             print_info(buf);
-            this->robot_.stopTraj();
+            stop_all_robots();
             // RosWrapper::halt(); //stop traj will stop motion, this will kill entire driver.
         }
     }
@@ -732,6 +816,7 @@ private:
         return average;
     }
 
+    // TODO(brycew): how to handle ROS control.
     void rosControlLoop()
     {
         ros::Duration elapsed_time;
@@ -960,14 +1045,14 @@ private:
                 {
                     print_error("Robot is protective stopped!");
                 }
-                if (has_goal_)
+
+                if (any_executing())
                 {
                     print_error("Aborting trajectory");
-                    robot_.stopTraj();
+                    stop_all_robots();
                     result_.error_code = result_.SUCCESSFUL;
-                    result_.error_string = "Robot was halted";
+                    result_.error_string = "Robots were halted";
                     goal_handle_.setAborted(result_, result_.error_string);
-                    has_goal_ = false;
                 }
                 warned = true;
             }
@@ -991,6 +1076,7 @@ int main(int argc, char **argv)
     {
         print_warning("use_sim_time is set!!");
     }
+    // TODO(brycew): add a place for multiple IPs
     if (!(ros::param::get("~robot_ip_address", host)))
     {
         if (argc > 1)
