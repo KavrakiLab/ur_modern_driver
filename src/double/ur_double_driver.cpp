@@ -61,7 +61,10 @@
 // all robots finish successfully, or one fails.
 #define WAITING 2
 
-class RosWrapperDouble
+/**
+ * Wraps N robots.
+ */
+class RosWrapperN
 {
 protected:
     /// Vectors of things directly related to the robot.
@@ -90,6 +93,7 @@ protected:
 
     // Threads.
     std::thread *rt_publish_thread_; // RT = Real time
+
     std::thread *mb_publish_thread_;
     double io_flag_delay_;
     double max_velocity_;
@@ -105,9 +109,9 @@ protected:
     int force_average_count_;
 
 public:
-    RosWrapperDouble(std::vector<std::string> hosts, int reverse_port_start, std::vector<std::string> prefixes)
-      : as_(nh_, "follow_joint_trajectory", boost::bind(&RosWrapper::goalCB, this, _1),
-            boost::bind(&RosWrapper::cancelCB, this, _1), false)
+    RosWrapperN(std::vector<std::string> hosts, int reverse_port_start, std::vector<std::string> prefixes)
+      : as_(nh_, "follow_joint_trajectory", boost::bind(&RosWrapperN::goalCB, this, _1),
+            boost::bind(&RosWrapperN::cancelCB, this, _1), false)
       , io_flag_delay_(0.05)
       , joint_offsets_(6, 0.0)
     {
@@ -138,7 +142,7 @@ public:
             joint_names.push_back(joint_prefix + "wrist_1_joint");
             joint_names.push_back(joint_prefix + "wrist_2_joint");
             joint_names.push_back(joint_prefix + "wrist_3_joint");
-            robots_[i].setJointNames(joint_names);
+            robots_[i]->setJointNames(joint_names);
         }
 
         use_ros_control_ = false;
@@ -148,8 +152,8 @@ public:
         {
             for (auto robot : robots_)
             {
-                hardware_interface = std::make_shared<ros_control_ur::UrHardwareInterface>(nh_, robot);
-                controller_manager =
+                auto hardware_interface = std::make_shared<ros_control_ur::UrHardwareInterface>(nh_, robot);
+                auto controller_manager =
                     std::make_shared<controller_manager::ControllerManager>(hardware_interface.get(), nh_);
                 controller_managers_.push_back(controller_manager);
                 double max_vel_change = 0.12;  // equivalent of an acceleration of 15 rad/sec^2
@@ -161,7 +165,7 @@ public:
                 sprintf(buf, "Max acceleration set to: %f [rad/sec²]", max_vel_change * 125);
                 print_debug(buf);
                 hardware_interface->setMaxVelChange(max_vel_change);
-                hardware_interfaces_.push_back(hardware_interface_);
+                hardware_interfaces_.push_back(hardware_interface);
             }
         }
         // Using a very high value in order to not limit execution of trajectories being sent from MoveIt!
@@ -223,13 +227,14 @@ public:
 
         for (auto robot : robots_)
         {
-            robot.setMinPayload(min_payload);
-            robot.setMaxPayload(max_payload);
-            robot.setServojTime(servoj_time);
-            robot.setServojLookahead(servoj_lookahead_time);
-            robot.setServojGain(servoj_gain);
+            robot->setMinPayload(min_payload);
+            robot->setMaxPayload(max_payload);
+            robot->setServojTime(servoj_time);
+            robot->setServojLookahead(servoj_lookahead_time);
+            robot->setServojGain(servoj_gain);
         }
 
+        // TODO(brycew): what to do with this? 
         // Base and tool frames
         base_frame_ = joint_prefix + "base_link";
         tool_frame_ = joint_prefix + "tool0_controller";
@@ -247,33 +252,37 @@ public:
         bool all_bots_started = true;
         for (auto robot : robots_)
         {
-            all_bots_started = all_bots_started && robot.start();
+            all_bots_started = all_bots_started && robot->start();
         }
         if (all_bots_started)
         {
             if (use_ros_control_)
             {
                 // TODO(brycew): launch one per robot?
-                ros_control_thread_ = new std::thread(boost::bind(&RosWrapper::rosControlLoop, this));
+                ros_control_thread_ = new std::thread(boost::bind(&RosWrapperN::rosControlLoop, this));
                 print_debug("The control thread for this driver has been started");
             }
             else
             {
                 // start actionserver
-                for (int i = 0; i < robots_size(); i++)
+                for (int i = 0; i < robots_.size(); i++)
                 {
                     has_goal_.push_back(false);
                 }
                 as_.start();
 
                 // subscribe to the data topic of interest
-                rt_publish_thread_ = new std::thread(boost::bind(&RosWrapper::publishRTMsg, this));
+                rt_publish_thread_ = new std::thread(boost::bind(&RosWrapperN::publishRTMsg, this));
                 print_debug("The action server for this driver has been started");
             }
-            mb_publish_thread_ = new std::thread(boost::bind(&RosWrapper::publishMbMsg, this));
-            speed_sub_ = nh_.subscribe("ur_driver/joint_speed", 1, &RosWrapper::speedInterface, this);
+            mb_publish_thread_ = new std::thread(boost::bind(&RosWrapperN::publishMbMsg, this));
+            speed_sub_ = nh_.subscribe("ur_driver/joint_speed", 1, &RosWrapperN::speedInterface, this);
             // TODO(brycew): Make a UR script for each robot available.
-            urscript_sub_ = nh_.subscribe("ur_driver/URScript", 1, &RosWrapper::urscriptInterface, this);
+            for (size_t i = 0; i < robots_.size(); i++)
+            {
+                std::string topic_name = "ur_driver/URScript" + std::to_string(i);
+                urscript_sub_ = nh_.subscribe<std_msgs::String>(topic_name, 1, boost::bind(&RosWrapperN::urscriptInterface, this, i, _1));
+            }
 
             if (ros::param::get("~max_force_dev", max_force_dev_))
             {
@@ -288,17 +297,17 @@ public:
             }
 
             force_torque_sub_ =
-                nh_.subscribe("robotiq_force_torque_wrench", 100, &RosWrapper::force_torque_sub, this);
+                nh_.subscribe("robotiq_force_torque_wrench", 100, &RosWrapperN::force_torque_sub, this);
 
-            io_srv_ = nh_.advertiseService("ur_driver/set_io", &RosWrapper::setIO, this);
-            payload_srv_ = nh_.advertiseService("ur_driver/set_payload", &RosWrapper::setPayload, this);
+            io_srv_ = nh_.advertiseService("ur_driver/set_io", &RosWrapperN::setIO, this);
+            payload_srv_ = nh_.advertiseService("ur_driver/set_payload", &RosWrapperN::setPayload, this);
         }
     }
 
     void halt()
     {
         for (auto robot : robots_)
-            robot.halt();
+            robot->halt();
         rt_publish_thread_->join();
     }
 
@@ -309,7 +318,7 @@ private:
      */
     bool any_executing()
     {
-        return std::accumulate(has_goal_.start(), has_goal_.end(),
+        return std::accumulate(has_goal_.begin(), has_goal_.end(),
                                false, [](bool a, bool b) { return a || b; });
     }
 
@@ -317,7 +326,7 @@ private:
     {
         for (size_t i = 0; i < robots_.size(); i++)
         {
-            robots_[i].stopTraj();
+            robots_[i]->stopTraj();
             has_goal_[i] = false;
         }
     }
@@ -326,12 +335,12 @@ private:
                     std::vector<std::vector<double>> velocities, size_t robot_idx)
     {
         // TODO(brycew): Before calling this, the traj needs to be split into the positions/velocities for robot i.
-        robots_[robot_idx].doTraj(timestamps, positions, velocities);
+        robots_[robot_idx]->doTraj(timestamps, positions, velocities);
 
         // Gets the number of remaining robots that need to complete goals.
-        bool remaining = std::accumulate(has_goal_.start(), has_goal_.end(),
+        bool remaining = std::accumulate(has_goal_.begin(), has_goal_.end(),
                                    0, [](int a, bool b) { return a + (b) ? 1 : 0; });
-        if (remaining == 1 && has_goal_[robot_idx_])
+        if (remaining == 1 && has_goal_[robot_idx])
         {
             // If this is the last robot to reach it's goal
             // TODO(brycew): do we need to check if result_ is already failing? What do we do if that is the case?
@@ -366,7 +375,7 @@ private:
                     return;
                 }
                 result_.error_string = "Cannot accept new trajectories. (Debug: Robot mode is " +
-                    std::to_string(robot_.sec_interface_->robot_state_->getRobotMode()) + ")";
+                    std::to_string(robot->sec_interface_->robot_state_->getRobotMode()) + ")";
                 gh.setRejected(result_, result_.error_string);
                 print_error(result_.error_string);
                 return;
@@ -467,21 +476,33 @@ private:
         // TODO(brycew): split the trajectory into the separate sections for each robot here.
         // Still precompute outside of the loop that spawns threads so the threads can be started at the same time.
         std::vector<double> timestamps;
-        std::vector<std::vector<double>> positions, velocities;
+        std::vector<std::vector<std::vector<double>>> positions, velocities; // For each robot, for each point, for each joint.
         if (goal.trajectory.points[0].time_from_start.toSec() != 0.)
         {
             print_warning("Trajectory's first point should be the current position, with time_from_start set "
                           "to 0.0 - Inserting point in malformed trajectory");
             timestamps.push_back(0.0);
             // TODO(brycew): get the Q and Qd actual from all robots.
-            positions.push_back(robot_.rt_interface_->robot_state_->getQActual());
-            velocities.push_back(robot_.rt_interface_->robot_state_->getQdActual());
+            for (auto robot : robots_)
+            {
+                positions.push_back({robot->rt_interface_->robot_state_->getQActual()});
+                velocities.push_back({robot->rt_interface_->robot_state_->getQdActual()});
+            }
         }
         for (unsigned int i = 0; i < goal.trajectory.points.size(); i++)
         {
             timestamps.push_back(goal.trajectory.points[i].time_from_start.toSec());
-            positions.push_back(goal.trajectory.points[i].positions);
-            velocities.push_back(goal.trajectory.points[i].velocities);
+            size_t traj_offset = 0;
+            for (size_t j = 0; j < robots_.size())
+            {
+                // TODO(brycew): split.
+                auto point = goal.trajectory.points[i];
+                std::vector<double> split_positions(point.positions.begin() + traj_offset, point.positions.end() + traj_offset + 6);
+                std::vector<double> split_velocites(point.velocities.begin() + traj_offset, point.velocities.end() + traj_offset + 6);
+                positions[j].push_back(split_positions);
+                velocities[j].push_back(split_velocites);
+            }
+            traj_offset += 6;
         }
 
         goal_handle_.setAccepted();
@@ -491,7 +512,7 @@ private:
             // TODO(brycew): access the precomputed sections of the trajectory here.
             std::vector<std::vector<double> > robot_i_positions; // ...
             std::vector<std::vector<double> > robot_i_velocities; // ...
-            std::thread(&RosWrapper::trajThread, this, timestamps, robot_i_positions, robot_i_velocites, i).detach();
+            std::thread(&RosWrapperN::trajThread, this, timestamps, robot_i_positions, robot_i_velocites, i).detach();
         }
     }
 
@@ -522,24 +543,24 @@ private:
             // if (req.fun == ur_msgs::SetIO::Request::FUN_SET_DIGITAL_OUT) {
             if (req.fun == 1)
             {
-                robot.setDigitalOut(req.pin, req.state > 0.0 ? true : false);
+                robot->setDigitalOut(req.pin, req.state > 0.0 ? true : false);
             }
             else if (req.fun == 2)
             {
                 //} else if (req.fun == ur_msgs::SetIO::Request::FUN_SET_FLAG) {
-                robot.setFlag(req.pin, req.state > 0.0 ? true : false);
+                robot->setFlag(req.pin, req.state > 0.0 ? true : false);
                 // According to urdriver.py, set_flag will fail if called to rapidly in succession
                 ros::Duration(io_flag_delay_).sleep();
             }
             else if (req.fun == 3)
             {
                 //} else if (req.fun == ur_msgs::SetIO::Request::FUN_SET_ANALOG_OUT) {
-                robot.setAnalogOut(req.pin, req.state);
+                robot->setAnalogOut(req.pin, req.state);
             }
             else if (req.fun == 4)
             {
                 //} else if (req.fun == ur_msgs::SetIO::Request::FUN_SET_TOOL_VOLTAGE) {
-                robot.setToolVoltage((int)req.state);
+                robot->setToolVoltage((int)req.state);
             }
             else
             {
@@ -571,11 +592,11 @@ private:
     bool validateJointNames()
     {
         std::vector<std::string> actual_joint_names;
-        actual_joint_names.reserve(robots_size() * robots_[0].getJointNames().size());
+        actual_joint_names.reserve(robots_.size() * robots_[0]->getJointNames().size());
         for (auto robot : robots_)
         {
-            std::vector<std::string> joints = robot.getJointNames();
-            actual_joint_names.insert(actual_joint_names.end(), joints.start(), joints.end());
+            std::vector<std::string> joints = robot->getJointNames();
+            actual_joint_names.insert(actual_joint_names.end(), joints.begin(), joints.end());
         }
         actionlib::ActionServer<control_msgs::FollowJointTrajectoryAction>::Goal goal =
             *goal_handle_.getGoal();
@@ -607,11 +628,11 @@ private:
     {
         /* Reorders trajectory - destructive */
         std::vector<std::string> actual_joint_names;
-        actual_joint_names.reserve(robots_size() * robots_[0].getJointNames().size());
+        actual_joint_names.reserve(robots_.size() * robots_[0]->getJointNames().size());
         for (auto robot : robots_)
         {
-            std::vector<std::string> joints = robot.getJointNames();
-            actual_joint_names.insert(actual_joint_names.end(), joints.start(), joints.end());
+            std::vector<std::string> joints = robot->getJointNames();
+            actual_joint_names.insert(actual_joint_names.end(), joints.begin(), joints.end());
         }
         std::vector<unsigned int> mapping;
         mapping.resize(actual_joint_names.size(), actual_joint_names.size());
@@ -645,7 +666,7 @@ private:
     {
         actionlib::ActionServer<control_msgs::FollowJointTrajectoryAction>::Goal goal =
             *goal_handle_.getGoal();
-        if (goal.trajectory.poinst.size() == 0)
+        if (goal.trajectory.points.size() == 0)
             return false;
         for (unsigned int i = 0; i < goal.trajectory.points.size(); i++)
         {
@@ -744,9 +765,9 @@ private:
     }
 
     // TODO(brycew): best way would be to make a separate server part for each UR, so we'd get an index in this call.
-    void urscriptInterface(const std_msgs::String::ConstPtr &msg)
+    void urscriptInterface(size_t idx, const std_msgs::String::ConstPtr &msg)
     {
-        robot_.rt_interface_->addCommandToQueue(msg->data);
+        robots_[idx].rt_interface_->addCommandToQueue(msg->data);
     }
 
     void force_torque_sub(const geometry_msgs::WrenchStamped::ConstPtr &msg)
@@ -766,18 +787,18 @@ private:
         if (this->Fx_list.size() > this->force_average_count_)
         {
             this->Fx_list.erase(this->Fx_list.begin());
-            Fx_avg = RosWrapper::average_vector(this->Fx_list);
+            Fx_avg = RosWrapperN::average_vector(this->Fx_list);
             start = true;
         }
         if (this->Fy_list.size() > this->force_average_count_)
         {
             this->Fy_list.erase(this->Fy_list.begin());
-            Fy_avg = RosWrapper::average_vector(this->Fy_list);
+            Fy_avg = RosWrapperN::average_vector(this->Fy_list);
         }
         if (this->Fz_list.size() > this->force_average_count_)
         {
             this->Fz_list.erase(this->Fz_list.begin());
-            Fz_avg = RosWrapper::average_vector(this->Fz_list);
+            Fz_avg = RosWrapperN::average_vector(this->Fz_list);
         }
 
         total_avg = std::sqrt(Fx_avg * Fx_avg + Fy_avg * Fy_avg + Fz_avg * Fz_avg);
@@ -810,7 +831,7 @@ private:
             sprintf(buf, "MAXIMUM REACHED, TOTAL VALUE = %f", total_current);
             print_info(buf);
             stop_all_robots();
-            // RosWrapper::halt(); //stop traj will stop motion, this will kill entire driver.
+            // RosWrapperN::halt(); //stop traj will stop motion, this will kill entire driver.
         }
     }
 
@@ -1081,7 +1102,7 @@ private:
 int main(int argc, char **argv)
 {
     bool use_sim_time = false;
-    std::vector<std::string> host;
+    std::vector<std::string> hosts;
     std::vector<std::string> prefixes;
     int reverse_port = 50001;
 
@@ -1115,7 +1136,7 @@ int main(int argc, char **argv)
     else
         reverse_port = 50001;
 
-    RosWrapper interface(hosts, reverse_port, prefixes);
+    RosWrapperN interface(hosts, reverse_port, prefixes);
 
     ros::AsyncSpinner spinner(3);
     spinner.start();

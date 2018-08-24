@@ -162,6 +162,8 @@ set(${PROJECT_NAME}_SOURCES
     src/do_output.cpp)
 add_executable(ur_driver ${${PROJECT_NAME}_SOURCES})
 
+add_library(ur_modern_driver ${${PROJECT_NAME}_SOURCES})
+
 ## Add cmake target dependencies of the executable
 ## same as for the library above
  add_dependencies(ur_driver ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
@@ -171,6 +173,11 @@ target_link_libraries(ur_driver
   ur_hardware_interface
   ${catkin_LIBRARIES}
  )
+
+ ## Make the N-robot executable
+ add_executable(ur_n_driver src/double/ur_double_driver.cpp)
+
+ target_link_libraries(ur_n_driver ur_modern_driver)
 
 #############
 ## Install ##
