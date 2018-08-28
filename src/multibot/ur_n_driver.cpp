@@ -25,6 +25,7 @@
 #include <condition_variable>
 #include <thread>
 #include <algorithm>
+#include <numeric>
 #include <cmath>
 #include <chrono>
 #include <time.h>
@@ -124,6 +125,10 @@ public:
             robots_.push_back(robot);
             reverse_port += 1;
         }
+
+        if (prefixes.size() == 0)
+            // This happens if we are only running one robot and don't want to prefix.
+            prefixes.push_back("");
 
         char buf[256];
 
@@ -484,8 +489,13 @@ private:
             timestamps.push_back(0.0);
             for (auto robot : robots_)
             {
-                positions.push_back({robot->rt_interface_->robot_state_->getQActual()});
-                velocities.push_back({robot->rt_interface_->robot_state_->getQdActual()});
+                std::vector<double> start_position = robot->rt_interface_->robot_state_->getQActual();
+                std::vector<double> start_velocity = robot->rt_interface_->robot_state_->getQdActual();
+                std::vector<std::vector<double>> start_point_position, start_point_velocity;
+                start_point_position.push_back(start_position);
+                start_point_velocity.push_back(start_velocity); 
+                positions.push_back(start_point_position);
+                velocities.push_back(start_point_velocity);
             }
         }
         for (unsigned int i = 0; i < goal.trajectory.points.size(); i++)
@@ -494,7 +504,6 @@ private:
             size_t traj_offset = 0;
             for (size_t j = 0; j < robots_.size(); j++)
             {
-                // TODO(brycew): split.
                 auto point = goal.trajectory.points[i];
                 std::vector<double> split_positions(point.positions.begin() + traj_offset, point.positions.end() + traj_offset + 6);
                 std::vector<double> split_velocites(point.velocities.begin() + traj_offset, point.velocities.end() + traj_offset + 6);
@@ -508,8 +517,8 @@ private:
         for (size_t i = 0; i < robots_.size(); i++)
         {
             has_goal_[i] = true;
-            std::vector<std::vector<double> > robot_i_positions = positions[i];
-            std::vector<std::vector<double> > robot_i_velocities = velocities[i];
+            const std::vector<std::vector<double> > &robot_i_positions = positions[i];
+            const std::vector<std::vector<double> > &robot_i_velocities = velocities[i];
             std::thread(&RosWrapperN::trajThread, this, timestamps, robot_i_positions, robot_i_velocities, i).detach();
         }
     }
@@ -1152,9 +1161,14 @@ int main(int argc, char **argv)
                         "parameter server as robot_ip");
         exit(1);
     }
-    if (!(ros::param::get("~joint_prefixes", prefixes)))
+    if (!(ros::param::get("~prefixes", prefixes)))
     {
         print_fatal("Could not get joint prefixes for each robot. Each robot needs a different prefix.");
+        exit(1);
+    }
+    if (prefixes.size() == 0 && hosts.size() > 1)
+    {
+        print_fatal("If using more than 1 robot, we need to have prefixes for each.");
         exit(1);
     }
     if ((ros::param::get("~reverse_port", reverse_port)))

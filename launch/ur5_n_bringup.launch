@@ -12,14 +12,20 @@
   <arg name="two_robots" default="true"/>
   <arg name="ip1" default="192.168.0.19"/>
   <arg name="ip2" default="192.168.0.20"/>
+ 
+  <arg name="debug" default="false"/>
+  <arg unless="$(arg debug)" name="launch_prefix" value=""/>
+  <arg     if="$(arg debug)" name="launch_prefix"
+        value="gdb -x $(find ur_modern_driver)/launch/gdb_settings.gdb --ex run --args"/>
 
   <!-- If this is the only robot running, then launch this gripper. -->
   <arg name="primary_gripper" default="/dev/serial/by-id/usb-FTDI_USB_TO_RS-485_DAWYTZJ9-if00-port0"/> 
   <arg name="primary_fts" default="serial/by-id/usb-FTDI_USB_TO_RS-485_DAWYU7R4-if00-port0"/>
-  <arg name="primary_prefix" default="right"/>
+  <arg     if="$(arg two_robots)" name="primary_prefix" default="right_"/>
+  <arg unless="$(arg two_robots)" name="primary_prefix" default=""/>
   <arg name="secondary_gripper" default="/dev/serial/by-id/usb-FTDI_USB_TO_RS-485_DAWYTZGT-if00-port0"/>
   <arg name="secondary_fts" default="serial/by-id/usb-FTDI_USB_TO_RS-485_DAK1RJDS-if00-port0"/>
-  <arg name="secondary_prefix" default="left"/>
+  <arg name="secondary_prefix" default="left_"/>
 
   <!-- robot_ip: IP-address of the robot's socket-messaging server -->
   <arg name="force_sensor" default="true"/>
@@ -29,19 +35,18 @@
   <arg name="min_payload"  default="0.0"/>
   <arg name="max_payload"  default="5.0"/>
 
-  <!-- robot model: TODO(brycew): does this need to be the complete double? -->
-  <include file="$(find ur_description)/launch/ur5_robotiq85_upload.launch">
-    <arg name="limited" value="$(arg limited)"/>
-    <arg name="prefix">
-  </include>
 
   <arg name="servoj_time" default="0.008"/>
-  <arg name="max_force_dev" default="1.0"/>
   <!-- The max_velocity parameter is only used for debugging in the ur_driver. It's not related to actual velocity limits -->
   <arg name="max_velocity" default="10.0"/> <!-- [rad/s] -->
 
   <group if="$(arg two_robots)">
-    <node name="ur_n_driver" pkg="ur_modern_driver" type="ur_n_driver" output="screen">
+
+    <include file="$(find ur_description)/launch/ur5_double_upload.launch">
+      <arg name="limited" value="$(arg limited)"/>
+    </include>
+
+    <node name="ur_n_driver" launch-prefix="$(arg launch_prefix)" pkg="ur_modern_driver" type="ur_n_driver" output="screen">
       <rosparam param="prefixes" subst_value="True">[$(arg primary_prefix), $(arg secondary_prefix)]</rosparam>
       <rosparam param="robot_ip_address" subst_value="True">[$(arg ip1), $(arg ip2)]</rosparam>
       <param name="min_payload" type="double" value="$(arg min_payload)"/>
@@ -54,25 +59,31 @@
     </node>
 
     <!-- If we're launching both robots, bringup the secondary gripper and FTS. -->
-    <include file="$(find robotiq_85_bringup)/launch/robotiq_85.launch" unless="$(arg sim)">
+    <include file="$(find robotiq_85_bringup)/launch/robotiq_85.launch">
       <arg name="comport" value="$(arg secondary_gripper)"/>
       <arg name="prefix" value="$(arg secondary_prefix)"/>
     </include>
 
-    <node name="$(eval secondary_prefix + '_moveit_robotiq_commander')" pkg="ros_sns_interface" type="MoveItRobotiqAction.py" ns="$(eval secondary_prefix + '_gripper')" output="screen" unless="$(arg sim)">
-    <param name="gripper_name" type="string" value="$(eval secondary_prefix + '_gripper')"/>
-      <param name="joint_name" type="string" value="$(eval secondary_prefix + '_robotiq_85_left_knuckle_joint"/>
+    <node name="$(eval secondary_prefix + 'moveit_robotiq_commander')" pkg="ros_sns_interface" type="MoveItRobotiqAction.py" ns="$(eval secondary_prefix + 'gripper')" output="screen"> 
+    <param name="gripper_name" type="string" value="$(eval secondary_prefix + 'gripper')"/>
+      <param name="joint_name" type="string" value="$(eval secondary_prefix + 'robotiq_85_left_knuckle_joint"/>
     </node>
 
-    <include file="$(find robotiq_force_torque_sensor)/launch/force_torque_sensor.launch" unless="$(arg sim)">
+    <include file="$(find robotiq_force_torque_sensor)/launch/force_torque_sensor.launch">
       <arg name="serial_id" value="$(arg secondary_fts)"/>
       <arg name="prefix" value="$(arg secondary_prefix)"/>
     </include>
   </group>
   <group unless="$(arg two_robots)">
-    <node name="ur_n_driver" pkg="ur_modern_driver" type="ur_n_driver" output="screen">
+    
+    <include file="$(find ur_description)/launch/ur5_robotiq85_upload.launch">
+      <arg name="limited" value="$(arg limited)"/>
+      <arg name="prefix" value="$(arg primary_prefix)"/>
+    </include>
+
+    <node name="ur_n_driver" launch-prefix="$(arg launch_prefix)" pkg="ur_modern_driver" type="ur_n_driver" output="screen">
       <rosparam param="prefixes" subst_value="True">[$(arg primary_prefix)]</rosparam>
-      <rosparam param="robot_ip_address" subst_value="True">[$(arg ip1)]</rosparam>
+      <rosparam param="robot_ip_addresses" subst_value="True">[$(arg ip1)]</rosparam>
       <param name="min_payload" type="double" value="$(arg min_payload)"/>
       <param name="max_payload" type="double" value="$(arg max_payload)"/>
       <param name="max_velocity" type="double" value="$(arg max_velocity)"/>
@@ -84,17 +95,17 @@
   </group>
   
   <!-- Bringup the primary Gripper and Force Torque Sensor. -->
-  <include file="$(find robotiq_85_bringup)/launch/robotiq_85.launch" unless="$(arg sim)">
+  <include file="$(find robotiq_85_bringup)/launch/robotiq_85.launch">
     <arg name="comport" value="$(arg primary_gripper)"/>
-    <arg name="prefix" value="$(arg primary_prefix)"/>
+    <!--arg name="prefix" value="$(arg primary_prefix)"/-->
   </include>
 
-  <node name="$(eval primary_prefix + '_moveit_robotiq_commander')" pkg="ros_sns_interface" type="MoveItRobotiqAction.py" ns="$(eval primary_prefix + '_gripper')" output="screen" unless="$(arg sim)">
-    <param name="gripper_name" type="string" value="$(eval primary_prefix + '_gripper')"/>
-    <param name="joint_name" type="string" value="$(eval primary_prefix + '_robotiq_85_left_knuckle_joint')"/>
+  <node name="$(eval primary_prefix + 'moveit_robotiq_commander')" pkg="ros_sns_interface" type="MoveItRobotiqAction.py" ns="$(eval primary_prefix + 'gripper')" output="screen">
+    <param name="gripper_name" type="string" value="$(eval primary_prefix + 'gripper')"/>
+    <param name="joint_name" type="string" value="$(eval primary_prefix + 'robotiq_85_left_knuckle_joint')"/>
   </node>
 
-  <include file="$(find robotiq_force_torque_sensor)/launch/force_torque_sensor.launch" unless="$(arg sim)">
+  <include file="$(find robotiq_force_torque_sensor)/launch/force_torque_sensor.launch">
     <arg name="serial_id" value="$(arg primary_fts)"/>
     <arg name="prefix" value="$(arg primary_prefix)"/>
   </include>
