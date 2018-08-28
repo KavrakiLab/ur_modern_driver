@@ -98,8 +98,8 @@ protected:
     double io_flag_delay_;
     double max_velocity_;
     std::vector<double> joint_offsets_; // Adjusts the positions of joint i by joint_offsets_[i]
-    std::string base_frame_;
-    std::string tool_frame_;
+    std::vector<std::string> base_frames_;
+    std::vector<std::string> tool_frames_;
     bool use_ros_control_;
     std::thread *ros_control_thread_;
     std::vector<double> Fx_list;
@@ -113,7 +113,7 @@ public:
       : as_(nh_, "follow_joint_trajectory", boost::bind(&RosWrapperN::goalCB, this, _1),
             boost::bind(&RosWrapperN::cancelCB, this, _1), false)
       , io_flag_delay_(0.05)
-      , joint_offsets_(6, 0.0)
+      , joint_offsets_(hosts.size() * 6, 0.0)
     {
         int reverse_port = reverse_port_start;
         for (std::string host : hosts)
@@ -147,6 +147,11 @@ public:
 
         use_ros_control_ = false;
         ros::param::get("~use_ros_control", use_ros_control_);
+        if (use_ros_control_)
+        {
+            print_warning("ROS Control not yet implemented for multiple robots. ROS Control will not be used.");
+            use_ros_control_ = false;
+        }
 
         if (use_ros_control_)
         {
@@ -234,20 +239,14 @@ public:
             robot->setServojGain(servoj_gain);
         }
 
-        // TODO(brycew): what to do with this? 
         // Base and tool frames
-        base_frame_ = joint_prefix + "base_link";
-        tool_frame_ = joint_prefix + "tool0_controller";
-        if (ros::param::get("~base_frame", base_frame_))
+        for (size_t i = 0; i < prefixes.size(); i++)
         {
-            sprintf(buf, "Base frame set to: %s", base_frame_.c_str());
-            print_debug(buf);
+            base_frames_.push_back(prefixes[i] + "base_link");
+            tool_frames_.push_back(prefixes[i] + "tool0_controller");
         }
-        if (ros::param::get("~tool_frame", tool_frame_))
-        {
-            sprintf(buf, "Tool frame set to: %s", tool_frame_.c_str());
-            print_debug(buf);
-        }
+        ros::param::get("~base_frame", base_frames_);
+        ros::param::get("~tool_frame", tool_frames_);
 
         bool all_bots_started = true;
         for (auto robot : robots_)
@@ -258,11 +257,12 @@ public:
         {
             if (use_ros_control_)
             {
-                // TODO(brycew): launch one per robot?
-                ros_control_thread_ = new std::thread(boost::bind(&RosWrapperN::rosControlLoop, this));
-                print_debug("The control thread for this driver has been started");
+                // TODO(Someone Else): launch one per robot?
+                //ros_control_thread_ = new std::thread(boost::bind(&RosWrapperN::rosControlLoop, this));
+                //print_debug("The control thread for this driver has been started");
+                print_warning("Not using ROS control, hasn't been implemented yet for multiple URs. Starting the system as normal.");
             }
-            else
+            //else
             {
                 // start actionserver
                 for (int i = 0; i < robots_.size(); i++)
@@ -482,7 +482,6 @@ private:
             print_warning("Trajectory's first point should be the current position, with time_from_start set "
                           "to 0.0 - Inserting point in malformed trajectory");
             timestamps.push_back(0.0);
-            // TODO(brycew): get the Q and Qd actual from all robots.
             for (auto robot : robots_)
             {
                 positions.push_back({robot->rt_interface_->robot_state_->getQActual()});
@@ -493,7 +492,7 @@ private:
         {
             timestamps.push_back(goal.trajectory.points[i].time_from_start.toSec());
             size_t traj_offset = 0;
-            for (size_t j = 0; j < robots_.size())
+            for (size_t j = 0; j < robots_.size(); j++)
             {
                 // TODO(brycew): split.
                 auto point = goal.trajectory.points[i];
@@ -509,10 +508,9 @@ private:
         for (size_t i = 0; i < robots_.size(); i++)
         {
             has_goal_[i] = true;
-            // TODO(brycew): access the precomputed sections of the trajectory here.
-            std::vector<std::vector<double> > robot_i_positions; // ...
-            std::vector<std::vector<double> > robot_i_velocities; // ...
-            std::thread(&RosWrapperN::trajThread, this, timestamps, robot_i_positions, robot_i_velocites, i).detach();
+            std::vector<std::vector<double> > robot_i_positions = positions[i];
+            std::vector<std::vector<double> > robot_i_velocities = velocities[i];
+            std::thread(&RosWrapperN::trajThread, this, timestamps, robot_i_positions, robot_i_velocities, i).detach();
         }
     }
 
@@ -581,7 +579,7 @@ private:
             // Note(brycew): This code intentionally returns true in both cases, it's the same in ur_ros_wrapper.
             // No clear explaination of why in the commit log.
             // robot.setPayload() only fails if the requested val is out of the range set in the constructor.
-            if (robot.setPayload(req.payload))
+            if (robot->setPayload(req.payload))
                 resp.success = true;
             else
                 resp.success = true;
@@ -695,7 +693,7 @@ private:
         size_t traj_offset = 0;
         for (auto robot : robots_)
         {
-            std::vector<double> qActual = robot.rt_interface_->robot_state_->getQActual();
+            std::vector<double> qActual = robot->rt_interface_->robot_state_->getQActual();
             for (size_t i = 0; i < qActual.size(); i++)
             {
                 if (fabs(traj.points[0].positions[traj_offset + i] - qActual[i]) > eps)
@@ -767,7 +765,7 @@ private:
     // TODO(brycew): best way would be to make a separate server part for each UR, so we'd get an index in this call.
     void urscriptInterface(size_t idx, const std_msgs::String::ConstPtr &msg)
     {
-        robots_[idx].rt_interface_->addCommandToQueue(msg->data);
+        robots_[idx]->rt_interface_->addCommandToQueue(msg->data);
     }
 
     void force_torque_sub(const geometry_msgs::WrenchStamped::ConstPtr &msg)
@@ -851,7 +849,9 @@ private:
         return average;
     }
 
-    // TODO(brycew): how to handle ROS control.
+    // TODO(Someone Else): Handle ros_control for multiple URs.
+    // No one is using it at the moment, so it's getting commented out.
+    /*
     void rosControlLoop()
     {
         ros::Duration elapsed_time;
@@ -944,157 +944,190 @@ private:
             }
         }
     }
+    */
 
+    /**
+     * Publishes Realtime Messages about the robots' state and end effector states.
+     */
     void publishRTMsg()
     {
         ros::Publisher joint_pub = nh_.advertise<sensor_msgs::JointState>("joint_states", 1);
-        ros::Publisher wrench_pub = nh_.advertise<geometry_msgs::WrenchStamped>("wrench", 1);
-        ros::Publisher tool_vel_pub = nh_.advertise<geometry_msgs::TwistStamped>("tool_velocity", 1);
+        std::vector<ros::Publisher> wrench_pubs;
+        std::vector<ros::Publisher> tool_vel_pubs;
+        for (size_t i = 0; i < robots_.size(); i++)
+        {
+            wrench_pubs.emplace_back(nh_.advertise<geometry_msgs::WrenchStamped>("wrench"  + std::to_string(i), 1));
+            tool_vel_pubs.emplace_back(nh_.advertise<geometry_msgs::TwistStamped>("tool_velocity" + std::to_string(i), 1));
+        }
         static tf::TransformBroadcaster br;
         while (ros::ok())
         {
             sensor_msgs::JointState joint_msg;
-            joint_msg.name = robot_.getJointNames();
-            geometry_msgs::WrenchStamped wrench_msg;
-            geometry_msgs::PoseStamped tool_pose_msg;
-            std::mutex msg_lock;  // The values are locked for reading in the class, so just use a dummy mutex
-            std::unique_lock<std::mutex> locker(msg_lock);
-            while (!robot_.rt_interface_->robot_state_->getDataPublished())
+            size_t traj_offset = 0;
+            for (auto robot : robots_)
             {
-                rt_msg_cond_.wait(locker);
+                std::vector<std::string> j_names = robot->getJointNames();
+                joint_msg.name.insert(joint_msg.name.end(), j_names.begin(), j_names.end());
+                std::mutex msg_lock;  // The values are locked for reading in the class, so just use a dummy mutex
+                std::unique_lock<std::mutex> locker(msg_lock);
+                while (!robot->rt_interface_->robot_state_->getDataPublished())
+                {
+                    rt_msg_cond_.wait(locker);
+                }
+                joint_msg.header.stamp = ros::Time::now();
+                std::vector<double> position = robot->rt_interface_->robot_state_->getQActual();
+                std::vector<double> velocity = robot->rt_interface_->robot_state_->getQdActual();
+                std::vector<double> effort = robot->rt_interface_->robot_state_->getIActual();
+                joint_msg.position.insert(joint_msg.position.end(), position.begin(), position.end());
+                for (unsigned int i = traj_offset; i < traj_offset + joint_msg.position.size(); i++)
+                {
+                    joint_msg.position[i] += joint_offsets_[i];
+                }
+                joint_msg.velocity.insert(joint_msg.velocity.end(), velocity.begin(), velocity.end());
+                joint_msg.effort.insert(joint_msg.effort.end(), effort.begin(), effort.end());
+                traj_offset += joint_msg.position.size();
             }
-            joint_msg.header.stamp = ros::Time::now();
-            joint_msg.position = robot_.rt_interface_->robot_state_->getQActual();
-            for (unsigned int i = 0; i < joint_msg.position.size(); i++)
-            {
-                joint_msg.position[i] += joint_offsets_[i];
-            }
-            joint_msg.velocity = robot_.rt_interface_->robot_state_->getQdActual();
-            joint_msg.effort = robot_.rt_interface_->robot_state_->getIActual();
             joint_pub.publish(joint_msg);
-            std::vector<double> tcp_force = robot_.rt_interface_->robot_state_->getTcpForce();
-            wrench_msg.header.stamp = joint_msg.header.stamp;
-            wrench_msg.wrench.force.x = tcp_force[0];
-            wrench_msg.wrench.force.y = tcp_force[1];
-            wrench_msg.wrench.force.z = tcp_force[2];
-            wrench_msg.wrench.torque.x = tcp_force[3];
-            wrench_msg.wrench.torque.y = tcp_force[4];
-            wrench_msg.wrench.torque.z = tcp_force[5];
-            wrench_pub.publish(wrench_msg);
 
-            // Tool vector: Actual Cartesian coordinates of the tool: (x,y,z,rx,ry,rz), where rx, ry and rz is
-            // a rotation vector representation of the tool orientation
-            std::vector<double> tool_vector_actual =
-                robot_.rt_interface_->robot_state_->getToolVectorActual();
-
-            // Create quaternion
-            tf::Quaternion quat;
-            double rx = tool_vector_actual[3];
-            double ry = tool_vector_actual[4];
-            double rz = tool_vector_actual[5];
-            double angle = std::sqrt(std::pow(rx, 2) + std::pow(ry, 2) + std::pow(rz, 2));
-            if (angle < 1e-16)
+            for (size_t i = 0; i < robots_.size(); i++)
             {
-                quat.setValue(0, 0, 0, 1);
+                auto robot = *robots_[i];
+                std::vector<double> tcp_force = robot.rt_interface_->robot_state_->getTcpForce();
+                geometry_msgs::WrenchStamped wrench_msg;
+                wrench_msg.header.stamp = joint_msg.header.stamp;
+                wrench_msg.wrench.force.x = tcp_force[0];
+                wrench_msg.wrench.force.y = tcp_force[1];
+                wrench_msg.wrench.force.z = tcp_force[2];
+                wrench_msg.wrench.torque.x = tcp_force[3];
+                wrench_msg.wrench.torque.y = tcp_force[4];
+                wrench_msg.wrench.torque.z = tcp_force[5];
+                wrench_pubs[i].publish(wrench_msg);
+
+                // Tool vector: Actual Cartesian coordinates of the tool: (x,y,z,rx,ry,rz), where rx, ry and rz is
+                // a rotation vector representation of the tool orientation
+                std::vector<double> tool_vector_actual =
+                    robot.rt_interface_->robot_state_->getToolVectorActual();
+
+                // Create quaternion
+                tf::Quaternion quat;
+                double rx = tool_vector_actual[3];
+                double ry = tool_vector_actual[4];
+                double rz = tool_vector_actual[5];
+                double angle = std::sqrt(std::pow(rx, 2) + std::pow(ry, 2) + std::pow(rz, 2));
+                if (angle < 1e-16)
+                {
+                    quat.setValue(0, 0, 0, 1);
+                }
+                else
+                {
+                    quat.setRotation(tf::Vector3(rx / angle, ry / angle, rz / angle), angle);
+                }
+
+                // Create and broadcast transform
+                tf::Transform transform;
+                transform.setOrigin(
+                    tf::Vector3(tool_vector_actual[0], tool_vector_actual[1], tool_vector_actual[2]));
+                transform.setRotation(quat);
+                br.sendTransform(
+                    tf::StampedTransform(transform, joint_msg.header.stamp, base_frames_[i], tool_frames_[i]));
+
+                // Publish tool velocity
+                std::vector<double> tcp_speed = robot.rt_interface_->robot_state_->getTcpSpeedActual();
+                geometry_msgs::TwistStamped tool_twist;
+                tool_twist.header.frame_id = base_frames_[i];
+                tool_twist.header.stamp = joint_msg.header.stamp;
+                tool_twist.twist.linear.x = tcp_speed[0];
+                tool_twist.twist.linear.y = tcp_speed[1];
+                tool_twist.twist.linear.z = tcp_speed[2];
+                tool_twist.twist.angular.x = tcp_speed[3];
+                tool_twist.twist.angular.y = tcp_speed[4];
+                tool_twist.twist.angular.z = tcp_speed[5];
+                tool_vel_pubs[i].publish(tool_twist);
+
+                robot.rt_interface_->robot_state_->setDataPublished();
             }
-            else
-            {
-                quat.setRotation(tf::Vector3(rx / angle, ry / angle, rz / angle), angle);
-            }
-
-            // Create and broadcast transform
-            tf::Transform transform;
-            transform.setOrigin(
-                tf::Vector3(tool_vector_actual[0], tool_vector_actual[1], tool_vector_actual[2]));
-            transform.setRotation(quat);
-            br.sendTransform(
-                tf::StampedTransform(transform, joint_msg.header.stamp, base_frame_, tool_frame_));
-
-            // Publish tool velocity
-            std::vector<double> tcp_speed = robot_.rt_interface_->robot_state_->getTcpSpeedActual();
-            geometry_msgs::TwistStamped tool_twist;
-            tool_twist.header.frame_id = base_frame_;
-            tool_twist.header.stamp = joint_msg.header.stamp;
-            tool_twist.twist.linear.x = tcp_speed[0];
-            tool_twist.twist.linear.y = tcp_speed[1];
-            tool_twist.twist.linear.z = tcp_speed[2];
-            tool_twist.twist.angular.x = tcp_speed[3];
-            tool_twist.twist.angular.y = tcp_speed[4];
-            tool_twist.twist.angular.z = tcp_speed[5];
-            tool_vel_pub.publish(tool_twist);
-
-            robot_.rt_interface_->robot_state_->setDataPublished();
         }
     }
 
+    /**
+     * Publishes "Masterboard" data on ROS.
+     */
     void publishMbMsg()
     {
         bool warned = false;
-        ros::Publisher io_pub = nh_.advertise<ur_msgs::IOStates>("ur_driver/io_states", 1);
+        std::vector<ros::Publisher> io_pubs;
+        for (size_t i = 0; i < robots_.size(); i++)
+        {
+            io_pubs.emplace_back(nh_.advertise<ur_msgs::IOStates>("ur_driver/io_states" + std::to_string(i), 1));
+        }
 
         while (ros::ok())
         {
-            ur_msgs::IOStates io_msg;
-            std::mutex msg_lock;  // The values are locked for reading in the class, so just use a dummy mutex
-            std::unique_lock<std::mutex> locker(msg_lock);
-            while (!robot_.sec_interface_->robot_state_->getNewDataAvailable())
+            for (size_t i = 0; i < robots_.size(); i++)
             {
-                msg_cond_.wait(locker);
-            }
-            int i_max = 10;
-            if (robot_.sec_interface_->robot_state_->getVersion() > 3.0)
-                i_max = 18;  // From version 3.0, there are up to 18 inputs and outputs
-            for (unsigned int i = 0; i < i_max; i++)
-            {
-                ur_msgs::Digital digi;
-                digi.pin = i;
-                digi.state = ((robot_.sec_interface_->robot_state_->getDigitalInputBits() & (1 << i)) >> i);
-                io_msg.digital_in_states.push_back(digi);
-                digi.state = ((robot_.sec_interface_->robot_state_->getDigitalOutputBits() & (1 << i)) >> i);
-                io_msg.digital_out_states.push_back(digi);
-            }
-            ur_msgs::Analog ana;
-            ana.pin = 0;
-            ana.state = robot_.sec_interface_->robot_state_->getAnalogInput0();
-            io_msg.analog_in_states.push_back(ana);
-            ana.pin = 1;
-            ana.state = robot_.sec_interface_->robot_state_->getAnalogInput1();
-            io_msg.analog_in_states.push_back(ana);
-
-            ana.pin = 0;
-            ana.state = robot_.sec_interface_->robot_state_->getAnalogOutput0();
-            io_msg.analog_out_states.push_back(ana);
-            ana.pin = 1;
-            ana.state = robot_.sec_interface_->robot_state_->getAnalogOutput1();
-            io_msg.analog_out_states.push_back(ana);
-            io_pub.publish(io_msg);
-
-            if (robot_.sec_interface_->robot_state_->isEmergencyStopped() or
-                robot_.sec_interface_->robot_state_->isProtectiveStopped())
-            {
-                if (robot_.sec_interface_->robot_state_->isEmergencyStopped() and !warned)
+                auto robot = robots_[i];
+                ur_msgs::IOStates io_msg;
+                std::mutex msg_lock;  // The values are locked for reading in the class, so just use a dummy mutex
+                std::unique_lock<std::mutex> locker(msg_lock);
+                while (!robot->sec_interface_->robot_state_->getNewDataAvailable())
                 {
-                    print_error("Emergency stop pressed!");
+                    msg_cond_.wait(locker);
                 }
-                else if (robot_.sec_interface_->robot_state_->isProtectiveStopped() and !warned)
+                int i_max = 10;
+                if (robot->sec_interface_->robot_state_->getVersion() > 3.0)
+                    i_max = 18;  // From version 3.0, there are up to 18 inputs and outputs
+                for (unsigned int i = 0; i < i_max; i++)
                 {
-                    print_error("Robot is protective stopped!");
+                    ur_msgs::Digital digi;
+                    digi.pin = i;
+                    digi.state = ((robot->sec_interface_->robot_state_->getDigitalInputBits() & (1 << i)) >> i);
+                    io_msg.digital_in_states.push_back(digi);
+                    digi.state = ((robot->sec_interface_->robot_state_->getDigitalOutputBits() & (1 << i)) >> i);
+                    io_msg.digital_out_states.push_back(digi);
                 }
+                ur_msgs::Analog ana;
+                ana.pin = 0;
+                ana.state = robot->sec_interface_->robot_state_->getAnalogInput0();
+                io_msg.analog_in_states.push_back(ana);
+                ana.pin = 1;
+                ana.state = robot->sec_interface_->robot_state_->getAnalogInput1();
+                io_msg.analog_in_states.push_back(ana);
 
-                if (any_executing())
+                ana.pin = 0;
+                ana.state = robot->sec_interface_->robot_state_->getAnalogOutput0();
+                io_msg.analog_out_states.push_back(ana);
+                ana.pin = 1;
+                ana.state = robot->sec_interface_->robot_state_->getAnalogOutput1();
+                io_msg.analog_out_states.push_back(ana);
+                io_pubs[i].publish(io_msg);
+
+                if (robot->sec_interface_->robot_state_->isEmergencyStopped() or
+                    robot->sec_interface_->robot_state_->isProtectiveStopped())
                 {
-                    print_error("Aborting trajectory");
-                    stop_all_robots();
-                    result_.error_code = result_.SUCCESSFUL;
-                    result_.error_string = "Robots were halted";
-                    goal_handle_.setAborted(result_, result_.error_string);
+                    if (robot->sec_interface_->robot_state_->isEmergencyStopped() and !warned)
+                    {
+                        print_error("Emergency stop pressed!");
+                    }
+                    else if (robot->sec_interface_->robot_state_->isProtectiveStopped() and !warned)
+                    {
+                        print_error("Robot is protective stopped!");
+                    }
+
+                    if (any_executing())
+                    {
+                        print_error("Aborting trajectory");
+                        stop_all_robots();
+                        result_.error_code = result_.SUCCESSFUL;
+                        result_.error_string = "Robots were halted";
+                        goal_handle_.setAborted(result_, result_.error_string);
+                    }
+                    warned = true;
                 }
-                warned = true;
+                else
+                    warned = false;
+
+                robot->sec_interface_->robot_state_->finishedReading();
             }
-            else
-                warned = false;
-
-            robot_.sec_interface_->robot_state_->finishedReading();
         }
     }
 };

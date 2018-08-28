@@ -177,7 +177,7 @@ target_link_libraries(ur_driver
  ## Make the N-robot executable
  add_executable(ur_n_driver src/double/ur_double_driver.cpp)
 
- target_link_libraries(ur_n_driver ur_modern_driver)
+ target_link_libraries(ur_n_driver ur_modern_driver ${catkin_LIBRARIES} ur_hardware_interface)
 
 #############
 ## Install ##

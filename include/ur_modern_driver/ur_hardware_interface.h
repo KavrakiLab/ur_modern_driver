@@ -75,7 +75,7 @@ namespace ros_control_ur {
 static const double POSITION_STEP_FACTOR = 1;
 static const double VELOCITY_STEP_FACTOR = 1;
 
-CLASS_FORWARD(UrHandwareInterface);
+CLASS_FORWARD(UrHardwareInterface);
 
 /// \brief Hardware interface for a robot
 class UrHardwareInterface: public hardware_interface::RobotHW {

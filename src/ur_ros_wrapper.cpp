@@ -794,7 +794,6 @@ private:
             sensor_msgs::JointState joint_msg;
             joint_msg.name = robot_.getJointNames();
             geometry_msgs::WrenchStamped wrench_msg;
-            geometry_msgs::PoseStamped tool_pose_msg;
             std::mutex msg_lock;  // The values are locked for reading in the class, so just use a dummy mutex
             std::unique_lock<std::mutex> locker(msg_lock);
             while (!robot_.rt_interface_->robot_state_->getDataPublished())
