@@ -48,7 +48,7 @@
 
     <node name="ur_n_driver" launch-prefix="$(arg launch_prefix)" pkg="ur_modern_driver" type="ur_n_driver" output="screen">
       <rosparam param="prefixes" subst_value="True">[$(arg primary_prefix), $(arg secondary_prefix)]</rosparam>
-      <rosparam param="robot_ip_address" subst_value="True">[$(arg ip1), $(arg ip2)]</rosparam>
+      <rosparam param="robot_ip_addresses" subst_value="True">[$(arg ip1), $(arg ip2)]</rosparam>
       <param name="min_payload" type="double" value="$(arg min_payload)"/>
       <param name="max_payload" type="double" value="$(arg max_payload)"/>
       <param name="max_velocity" type="double" value="$(arg max_velocity)"/>
@@ -80,6 +80,14 @@
       <arg name="limited" value="$(arg limited)"/>
       <arg name="prefix" value="$(arg primary_prefix)"/>
     </include>
+
+    <!--include file="$(find ur_modern_driver)/launch/ur_common.launch">
+      <arg name="prefix" value="$(arg primary_prefix)"/>
+      <arg name="robot_ip" value="$(arg ip1)"/>
+      <arg name="min_payload" value="$(arg min_payload)"/>
+      <arg name="max_payload" value="$(arg max_payload)"/>
+      <arg name="max_force_dev" value="$(arg max_force_dev)"/>
+    </include-->
 
     <node name="ur_n_driver" launch-prefix="$(arg launch_prefix)" pkg="ur_modern_driver" type="ur_n_driver" output="screen">
       <rosparam param="prefixes" subst_value="True">[$(arg primary_prefix)]</rosparam>

@@ -336,10 +336,13 @@ private:
         }
     }
 
+    // TODO(brycew): Put this back to a single thread, rewrite to:
+    // * Take the full trajectory here.
+    // * parabolic-blend (? or something similar)
+    // * move doTraj up here: 
     void trajThread(std::vector<double> timestamps, std::vector<std::vector<double>> positions,
                     std::vector<std::vector<double>> velocities, size_t robot_idx)
     {
-        // TODO(brycew): Before calling this, the traj needs to be split into the positions/velocities for robot i.
         robots_[robot_idx]->doTraj(timestamps, positions, velocities);
 
         // Gets the number of remaining robots that need to complete goals.
@@ -481,21 +484,19 @@ private:
         // TODO(brycew): split the trajectory into the separate sections for each robot here.
         // Still precompute outside of the loop that spawns threads so the threads can be started at the same time.
         std::vector<double> timestamps;
-        std::vector<std::vector<std::vector<double>>> positions, velocities; // For each robot, for each point, for each joint.
+        std::vector<std::vector<std::vector<double>>> positions(robots_.size()), velocities(robots_.size()); // For each robot, for each point, for each joint.
         if (goal.trajectory.points[0].time_from_start.toSec() != 0.)
         {
             print_warning("Trajectory's first point should be the current position, with time_from_start set "
                           "to 0.0 - Inserting point in malformed trajectory");
             timestamps.push_back(0.0);
-            for (auto robot : robots_)
+            for (size_t i = 0; i < robots_.size(); i++)
             {
+                auto robot = robots_[i];
                 std::vector<double> start_position = robot->rt_interface_->robot_state_->getQActual();
                 std::vector<double> start_velocity = robot->rt_interface_->robot_state_->getQdActual();
-                std::vector<std::vector<double>> start_point_position, start_point_velocity;
-                start_point_position.push_back(start_position);
-                start_point_velocity.push_back(start_velocity); 
-                positions.push_back(start_point_position);
-                velocities.push_back(start_point_velocity);
+                positions[i].push_back(start_position);
+                velocities[i].push_back(start_velocity);
             }
         }
         for (unsigned int i = 0; i < goal.trajectory.points.size(); i++)
@@ -506,9 +507,9 @@ private:
             {
                 auto point = goal.trajectory.points[i];
                 std::vector<double> split_positions(point.positions.begin() + traj_offset, point.positions.end() + traj_offset + 6);
-                std::vector<double> split_velocites(point.velocities.begin() + traj_offset, point.velocities.end() + traj_offset + 6);
+                std::vector<double> split_velocities(point.velocities.begin() + traj_offset, point.velocities.end() + traj_offset + 6);
                 positions[j].push_back(split_positions);
-                velocities[j].push_back(split_velocites);
+                velocities[j].push_back(split_velocities);
             }
             traj_offset += 6;
         }
@@ -972,11 +973,15 @@ private:
         while (ros::ok())
         {
             sensor_msgs::JointState joint_msg;
+            std::vector<double> all_positions; 
+            std::vector<double> all_velocities; 
+            std::vector<double> all_efforts;
+            std::vector<std::string> all_names; 
             size_t traj_offset = 0;
             for (auto robot : robots_)
             {
                 std::vector<std::string> j_names = robot->getJointNames();
-                joint_msg.name.insert(joint_msg.name.end(), j_names.begin(), j_names.end());
+                all_names.insert(all_names.end(), j_names.begin(), j_names.end());
                 std::mutex msg_lock;  // The values are locked for reading in the class, so just use a dummy mutex
                 std::unique_lock<std::mutex> locker(msg_lock);
                 while (!robot->rt_interface_->robot_state_->getDataPublished())
@@ -987,15 +992,19 @@ private:
                 std::vector<double> position = robot->rt_interface_->robot_state_->getQActual();
                 std::vector<double> velocity = robot->rt_interface_->robot_state_->getQdActual();
                 std::vector<double> effort = robot->rt_interface_->robot_state_->getIActual();
-                joint_msg.position.insert(joint_msg.position.end(), position.begin(), position.end());
+                all_positions.insert(all_positions.end(), position.begin(), position.end());
                 for (unsigned int i = traj_offset; i < traj_offset + joint_msg.position.size(); i++)
                 {
-                    joint_msg.position[i] += joint_offsets_[i];
+                    all_positions[i] += joint_offsets_[i];
                 }
-                joint_msg.velocity.insert(joint_msg.velocity.end(), velocity.begin(), velocity.end());
-                joint_msg.effort.insert(joint_msg.effort.end(), effort.begin(), effort.end());
+                all_velocities.insert(all_velocities.end(), velocity.begin(), velocity.end());
+                all_efforts.insert(all_efforts.end(), effort.begin(), effort.end());
                 traj_offset += joint_msg.position.size();
             }
+            joint_msg.position = all_positions;
+            joint_msg.velocity = all_velocities;
+            joint_msg.effort = all_efforts;
+            joint_msg.name = all_names;
             joint_pub.publish(joint_msg);
 
             for (size_t i = 0; i < robots_.size(); i++)
