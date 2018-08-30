@@ -65,7 +65,7 @@
     </include>
 
     <node name="$(eval secondary_prefix + 'moveit_robotiq_commander')" pkg="ros_sns_interface" type="MoveItRobotiqAction.py" ns="$(eval secondary_prefix + 'gripper')" output="screen"> 
-    <param name="gripper_name" type="string" value="$(eval secondary_prefix + 'gripper')"/>
+      <param name="gripper_name" type="string" value="$(eval secondary_prefix + 'gripper')"/>
       <param name="joint_name" type="string" value="$(eval secondary_prefix + 'robotiq_85_left_knuckle_joint"/>
     </node>
 
@@ -105,7 +105,7 @@
   <!-- Bringup the primary Gripper and Force Torque Sensor. -->
   <include file="$(find robotiq_85_bringup)/launch/robotiq_85.launch">
     <arg name="comport" value="$(arg primary_gripper)"/>
-    <!--arg name="prefix" value="$(arg primary_prefix)"/-->
+    <arg name="prefix" value="$(arg primary_prefix)"/>
   </include>
 
   <node name="$(eval primary_prefix + 'moveit_robotiq_commander')" pkg="ros_sns_interface" type="MoveItRobotiqAction.py" ns="$(eval primary_prefix + 'gripper')" output="screen">

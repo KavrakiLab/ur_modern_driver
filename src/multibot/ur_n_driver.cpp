@@ -510,8 +510,8 @@ private:
                 std::vector<double> split_velocities(point.velocities.begin() + traj_offset, point.velocities.end() + traj_offset + 6);
                 positions[j].push_back(split_positions);
                 velocities[j].push_back(split_velocities);
+                traj_offset += 6;
             }
-            traj_offset += 6;
         }
 
         goal_handle_.setAccepted();
@@ -961,7 +961,7 @@ private:
      */
     void publishRTMsg()
     {
-        ros::Publisher joint_pub = nh_.advertise<sensor_msgs::JointState>("joint_states", 1);
+        ros::Publisher joint_pub = nh_.advertise<sensor_msgs::JointState>("manipulator/joint_states", 1);
         std::vector<ros::Publisher> wrench_pubs;
         std::vector<ros::Publisher> tool_vel_pubs;
         for (size_t i = 0; i < robots_.size(); i++)
