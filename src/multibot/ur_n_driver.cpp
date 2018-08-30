@@ -82,7 +82,7 @@ protected:
     actionlib::ServerGoalHandle<control_msgs::FollowJointTrajectoryAction> goal_handle_;
     // TODO(brycew): on the original ThomasTimm repo, PR 101 adds some mutexes to protect has_goal_.
     // Since this gets even more complicated with a vector, adapt these changes to this code.
-    std::vector<bool> has_goal_; // Whether each robot has a goal set/ has already reached that goal
+    bool has_goal_; // True if the robots have a goal set.
     control_msgs::FollowJointTrajectoryFeedback feedback_;
     control_msgs::FollowJointTrajectoryResult result_;
 
@@ -270,10 +270,7 @@ public:
             //else
             {
                 // start actionserver
-                for (int i = 0; i < robots_.size(); i++)
-                {
-                    has_goal_.push_back(false);
-                }
+                has_goal_ = false;
                 as_.start();
 
                 // subscribe to the data topic of interest
@@ -319,12 +316,16 @@ public:
 private:
     /**
      * Gets if any robots are still executing paths from the action server.
-     * Just a simple OR union over the has_goal_ vector.
      */
     bool any_executing()
     {
-        return std::accumulate(has_goal_.begin(), has_goal_.end(),
-                               false, [](bool a, bool b) { return a || b; });
+        return has_goal_; 
+    }
+  
+    bool all_executing()
+    {
+        return std::accumulate(robots_.begin(), robots_.end(),
+                               true, [](bool a, UrDriver *ur) { return a && ur->isExecuting(); });
     }
 
     void stop_all_robots()
@@ -332,8 +333,8 @@ private:
         for (size_t i = 0; i < robots_.size(); i++)
         {
             robots_[i]->stopTraj();
-            has_goal_[i] = false;
         }
+        has_goal_ = false;
     }
 
     // TODO(brycew): Put this back to a single thread, rewrite to:
@@ -341,21 +342,68 @@ private:
     // * parabolic-blend (? or something similar)
     // * move doTraj up here: 
     void trajThread(std::vector<double> timestamps, std::vector<std::vector<double>> positions,
-                    std::vector<std::vector<double>> velocities, size_t robot_idx)
+                    std::vector<std::vector<double>> velocities)
     {
-        robots_[robot_idx]->doTraj(timestamps, positions, velocities);
+        std::chrono::high_resolution_clock::time_point t0, t;
+        std::vector<double> interpolated_position;
+        unsigned int j;
+        bool all_uploaded = true;
+        for (auto robot : robots_)
+        {
+    	    all_uploaded &= robot->uploadProg();
+        }
+        if (not all_uploaded)
+        {
+            result_.error_code = result_.PATH_TOLERANCE_VIOLATED;
+            result_.error_string = "Could not upload the program to all robots.";
+            goal_handle_.setAborted(result_);
+            has_goal_ = false; 
+            return;
+        }
+        for (auto robot : robots_)
+        {
+            robot->setExecuting(true);
+        }
+        t0 = std::chrono::high_resolution_clock::now();
+        t = t0;
+        j = 0;
+        double duration = std::chrono::duration_cast<std::chrono::duration<double>>(t - t0).count();
+        while ((timestamps[timestamps.size() - 1] >= duration) and
+                all_executing()) 
+        {
+            while (timestamps[j] <= duration && j < timestamps.size() - 1)
+                j += 1;
+            interpolated_position = robots_[0]->interp_cubic(duration - timestamps[j - 1],
+                                               timestamps[j] - timestamps[j - 1], positions[j - 1], positions[j], velocities[j - 1], velocities[j]);
+            size_t traj_offset = 0;
+            for (auto robot : robots_)
+            {
+                std::vector<double> split_positions(interpolated_position.begin() + traj_offset, interpolated_position.begin() + traj_offset + 6); 
+                robot->servoj(split_positions);
+                traj_offset += 6;
+            }
 
-        // Gets the number of remaining robots that need to complete goals.
-        bool remaining = std::accumulate(has_goal_.begin(), has_goal_.end(),
-                                   0, [](int a, bool b) { return a + (b) ? 1 : 0; });
-        if (remaining == 1 && has_goal_[robot_idx])
+	    std::this_thread::sleep_for(std::chrono::milliseconds((int)((robots_[0]->getServojTime() * 1000) / 4.0)));
+            t = std::chrono::high_resolution_clock::now();
+            duration = std::chrono::duration_cast<std::chrono::duration<double>>(t - t0).count();
+        }
+        size_t traj_offset = 0;
+        for (auto robot : robots_)
+        {
+            std::vector<double> split_positions(interpolated_position.begin() + traj_offset, interpolated_position.begin() + traj_offset + 6); 
+            robot->setExecuting(false);
+            robot->closeServo(split_positions);
+            traj_offset += 6;
+        }
+
+        if (has_goal_)
         {
             // If this is the last robot to reach it's goal
             // TODO(brycew): do we need to check if result_ is already failing? What do we do if that is the case?
             result_.error_code = result_.SUCCESSFUL;
             goal_handle_.setSucceeded(result_);
         }
-        has_goal_[robot_idx] = false;
+        has_goal_ = false;
     }
 
     void goalCB(actionlib::ServerGoalHandle<control_msgs::FollowJointTrajectoryAction> gh)
@@ -481,47 +529,37 @@ private:
             return;
         }
 
-        // TODO(brycew): split the trajectory into the separate sections for each robot here.
-        // Still precompute outside of the loop that spawns threads so the threads can be started at the same time.
         std::vector<double> timestamps;
-        std::vector<std::vector<std::vector<double>>> positions(robots_.size()), velocities(robots_.size()); // For each robot, for each point, for each joint.
+        std::vector<std::vector<double>> positions, velocities; // For each point, for each joint (across all robots).
         if (goal.trajectory.points[0].time_from_start.toSec() != 0.)
         {
             print_warning("Trajectory's first point should be the current position, with time_from_start set "
                           "to 0.0 - Inserting point in malformed trajectory");
             timestamps.push_back(0.0);
+            std::vector<double> start_position;
+            std::vector<double> start_velocity;
             for (size_t i = 0; i < robots_.size(); i++)
             {
                 auto robot = robots_[i];
-                std::vector<double> start_position = robot->rt_interface_->robot_state_->getQActual();
-                std::vector<double> start_velocity = robot->rt_interface_->robot_state_->getQdActual();
-                positions[i].push_back(start_position);
-                velocities[i].push_back(start_velocity);
+                std::vector<double> current_position = robot->rt_interface_->robot_state_->getQActual();
+                std::vector<double> current_velocity = robot->rt_interface_->robot_state_->getQdActual();
+                
+                start_position.insert(start_position.end(), current_position.begin(), current_position.end());
+                start_velocity.insert(start_velocity.end(), start_velocity.begin(), start_velocity.end());
             }
+            positions.push_back(start_position);
+            velocities.push_back(start_velocity);
         }
         for (unsigned int i = 0; i < goal.trajectory.points.size(); i++)
         {
             timestamps.push_back(goal.trajectory.points[i].time_from_start.toSec());
-            size_t traj_offset = 0;
-            for (size_t j = 0; j < robots_.size(); j++)
-            {
-                auto point = goal.trajectory.points[i];
-                std::vector<double> split_positions(point.positions.begin() + traj_offset, point.positions.end() + traj_offset + 6);
-                std::vector<double> split_velocities(point.velocities.begin() + traj_offset, point.velocities.end() + traj_offset + 6);
-                positions[j].push_back(split_positions);
-                velocities[j].push_back(split_velocities);
-                traj_offset += 6;
-            }
+            positions.push_back(goal.trajectory.points[i].positions);
+            velocities.push_back(goal.trajectory.points[i].velocities);
         }
 
         goal_handle_.setAccepted();
-        for (size_t i = 0; i < robots_.size(); i++)
-        {
-            has_goal_[i] = true;
-            const std::vector<std::vector<double> > &robot_i_positions = positions[i];
-            const std::vector<std::vector<double> > &robot_i_velocities = velocities[i];
-            std::thread(&RosWrapperN::trajThread, this, timestamps, robot_i_positions, robot_i_velocities, i).detach();
-        }
+        has_goal_ = true;
+        std::thread(&RosWrapperN::trajThread, this, timestamps, positions, velocities).detach();
     }
 
     void cancelCB(actionlib::ServerGoalHandle<control_msgs::FollowJointTrajectoryAction> gh)

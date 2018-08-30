@@ -1,0 +1,22 @@
+<launch>
+  <!-- This launch file mostly chooses whether to use thing 1 or thing 2. -->
+  <arg name="thing1"/>
+  <arg     if="$(arg thing1)" name="ip" value="192.168.0.19"/>
+  <arg unless="$(arg thing1)" name="ip" value="192.168.0.20"/>
+  
+  <arg     if="$(arg thing1)" name="gripper_serial" value="/dev/serial/by-id/usb-FTDI_USB_TO_RS-485_DAWYTZJ9-if00-port0"/>
+  <arg     if="$(arg thing1)" name="fts_serial" value="serial/by-id/usb-FTDI_USB_TO_RS-485_DAWYU7R4-if00-port0"/>
+  <arg unless="$(arg thing1)" name="gripper_serial" value="/dev/serial/by-id/usb-FTDI_USB_TO_RS-485_DAWYTZGT-if00-port0"/>
+  <arg unless="$(arg thing1)" name="fts_serial" value="serial/by-id/usb-FTDI_USB_TO_RS-485_DAK1RJDS-if00-port0"/>
+
+  <arg name="debug" default="false"/>
+
+  <include file="$(find ur_modern_driver)/launch/ur5_n_bringup.launch">
+    <arg name="two_robots" value="false"/>
+    <arg name="ip1" value="$(arg ip)"/> 
+    <arg name="debug" value="$(arg debug)"/>
+    <arg name="primary_gripper" value="$(arg gripper_serial)"/>
+    <arg name="primary_fts" value="$(arg fts_serial)"/>
+  </include>
+</launch>
+

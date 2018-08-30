@@ -61,6 +61,21 @@ UrDriver::UrDriver(std::condition_variable &rt_msg_cond, std::condition_variable
     listen(incoming_sockfd_, 5);
 }
 
+double UrDriver::getServojTime() const
+{
+    return servoj_time_;
+}
+
+bool UrDriver::isExecuting() const
+{
+    return executing_traj_;
+}
+
+void UrDriver::setExecuting(bool executing)
+{
+    executing_traj_ = executing;
+}
+
 std::vector<double> UrDriver::interp_cubic(double t, double T, std::vector<double> p0_pos,
                                            std::vector<double> p1_pos, std::vector<double> p0_vel,
                                            std::vector<double> p1_vel)

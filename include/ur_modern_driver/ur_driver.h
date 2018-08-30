@@ -65,6 +65,18 @@ public:
 	bool start();
 	void halt();
 
+        /** Getter for the Servoj Time. */
+        double getServojTime() const;
+
+        /** Returns is the robot is currently executing a trajectory or not. */
+        bool isExecuting() const;
+
+        /** Manually sets if the robot is currently executing a trajectory.
+         *  Necessary because the N UR driver sends servoj commands to each robot at each waypoint,
+         *  meaning we can't use the blocking doTraj.
+         */
+        void setExecuting(bool executing); 
+
 	void setSpeed(double q0, double q1, double q2, double q3, double q4,
 			double q5, double acc = 100.);
 

@@ -1,0 +1,8 @@
+<launch>
+  <!-- Intenionally sparse launch file. Mirrors the existance of 'one_ur5_bringup.launch'. -->
+  <arg name="debug" default="false"/>
+  <include file="$(find ur_modern_driver)/launch/ur5_n_bringup.launch">
+    <arg name="two_robots" value="true"/>
+    <arg name="debug" value="$(arg debug)"/>
+  </include>
+</launch>
